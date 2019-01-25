@@ -1940,6 +1940,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	config.NoLocals = nolocals
 	config.Journal = journal
 	config.Rejournal = time.Second
+	config.BroadcastPendingLocalTx = time.Second
 
 	pool := NewTxPool(config, params.TestChainConfig, blockchain)
 
