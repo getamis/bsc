@@ -411,6 +411,11 @@ var (
 		Usage: "Time interval to regenerate the local transaction journal",
 		Value: core.DefaultTxPoolConfig.Rejournal,
 	}
+	TxPoolBroadcastPendingLocalTxFlag = cli.DurationFlag{
+		Name:  "txpool.broadcastpendinglocaltx",
+		Usage: "Time interval to broadcast the pending local transaction",
+		Value: core.DefaultTxPoolConfig.BroadcastPendingLocalTx,
+	}
 	TxPoolPriceLimitFlag = cli.Uint64Flag{
 		Name:  "txpool.pricelimit",
 		Usage: "Minimum gas price limit to enforce for acceptance into the pool",
@@ -1449,6 +1454,9 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 	if ctx.GlobalIsSet(TxPoolRejournalFlag.Name) {
 		cfg.Rejournal = ctx.GlobalDuration(TxPoolRejournalFlag.Name)
+	}
+	if ctx.GlobalIsSet(TxPoolBroadcastPendingLocalTxFlag.Name) {
+		cfg.BroadcastPendingLocalTx = ctx.GlobalDuration(TxPoolBroadcastPendingLocalTxFlag.Name)
 	}
 	if ctx.GlobalIsSet(TxPoolPriceLimitFlag.Name) {
 		cfg.PriceLimit = ctx.GlobalUint64(TxPoolPriceLimitFlag.Name)
