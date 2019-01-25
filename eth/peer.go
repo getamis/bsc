@@ -112,3 +112,15 @@ func (p *trustPeer) info() *trustPeerInfo {
 		Version: p.Version(),
 	}
 }
+
+// Clone clones a peers
+func (ps *peerSet) Clone() []*ethPeer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	list := make([]*ethPeer, 0, len(ps.peers))
+	for _, p := range ps.peers {
+		list = append(list, p)
+	}
+	return list
+}
