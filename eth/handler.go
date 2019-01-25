@@ -56,6 +56,10 @@ const (
 
 	// deltaTdThreshold is the threshold of TD difference for peers to broadcast votes.
 	deltaTdThreshold = 20
+
+	// pendingLocalTxChanSize is the size of channel listening to NewTxsEvent.
+	// The number is referenced from the size of tx pool.
+	pendingLocalTxChanSize = 4096
 )
 
 var (
@@ -87,6 +91,10 @@ type txPool interface {
 	// SubscribeReannoTxsEvent should return an event subscription of
 	// ReannoTxsEvent and send events to the given channel.
 	SubscribeReannoTxsEvent(chan<- core.ReannoTxsEvent) event.Subscription
+
+	// SubscribePendingLocalTxsEvent should return an event subscription of
+	// NewTxsEvent and send events to the given channel.
+	SubscribePendingLocalTxsEvent(chan<- core.PendingLocalTxsEvent) event.Subscription
 }
 
 // votePool defines the methods needed from a votes pool implementation to
@@ -145,14 +153,16 @@ type handler struct {
 	peers        *peerSet
 	merger       *consensus.Merger
 
-	eventMux      *event.TypeMux
-	txsCh         chan core.NewTxsEvent
-	txsSub        event.Subscription
-	reannoTxsCh   chan core.ReannoTxsEvent
-	reannoTxsSub  event.Subscription
-	minedBlockSub *event.TypeMuxSubscription
-	voteCh        chan core.NewVoteEvent
-	votesSub      event.Subscription
+	eventMux           *event.TypeMux
+	txsCh              chan core.NewTxsEvent
+	txsSub             event.Subscription
+	reannoTxsCh        chan core.ReannoTxsEvent
+	reannoTxsSub       event.Subscription
+	pendingLocalTxsCh  chan core.PendingLocalTxsEvent
+	pendingLocalTxsSub event.Subscription
+	minedBlockSub      *event.TypeMuxSubscription
+	voteCh             chan core.NewVoteEvent
+	votesSub           event.Subscription
 
 	whitelist map[uint64]common.Hash
 
@@ -633,7 +643,10 @@ func (h *handler) Start(maxPeers int) {
 	h.wg.Add(1)
 	h.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
+	h.pendingLocalTxsCh = make(chan core.PendingLocalTxsEvent, pendingLocalTxChanSize)
+	h.pendingLocalTxsSub = h.txpool.SubscribePendingLocalTxsEvent(h.pendingLocalTxsCh)
 	go h.txBroadcastLoop()
+	go h.pendingLocalTxBroadcastLoop()
 
 	// broadcast votes
 	if h.votepool != nil {
@@ -663,9 +676,12 @@ func (h *handler) Stop() {
 	h.txsSub.Unsubscribe()        // quits txBroadcastLoop
 	h.reannoTxsSub.Unsubscribe()  // quits txReannounceLoop
 	h.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+
 	if h.votepool != nil {
 		h.votesSub.Unsubscribe() // quits voteBroadcastLoop
 	}
+
+	h.pendingLocalTxsSub.Unsubscribe()
 
 	// Quit chainSync and txsync64.
 	// After this is done, no new peers will be accepted.
@@ -829,6 +845,20 @@ func (h *handler) BroadcastVote(vote *types.VoteEnvelope) {
 	log.Debug("Vote broadcast", "vote packs", directPeers, "broadcast vote", directCount)
 }
 
+// BroadcastPendingLocalTxs will propagate a batch of transactions to all peers
+func (h *handler) BroadcastPendingLocalTxs(txs types.Transactions) {
+	peers := h.peers.Clone()
+	// Build tx hashes
+	txHashes := make([]common.Hash, len(txs))
+	for i, tx := range txs {
+		txHashes[i] = tx.Hash()
+	}
+	for _, peer := range peers {
+		peer.AsyncSendTransactions(txHashes)
+	}
+	log.Info("Broadcast pending local transaction to all peers", "recipients", len(peers))
+}
+
 // minedBroadcastLoop sends mined blocks to connected peers.
 func (h *handler) minedBroadcastLoop() {
 	defer h.wg.Done()
@@ -875,6 +905,19 @@ func (h *handler) voteBroadcastLoop() {
 		case event := <-h.voteCh:
 			h.BroadcastVote(event.Vote)
 		case <-h.votesSub.Err():
+			return
+		}
+	}
+}
+
+func (h *handler) pendingLocalTxBroadcastLoop() {
+	for {
+		select {
+		case event := <-h.pendingLocalTxsCh:
+			h.BroadcastPendingLocalTxs(event.Txs)
+
+		// Err() channel will be closed when unsubscribing.
+		case <-h.pendingLocalTxsSub.Err():
 			return
 		}
 	}
