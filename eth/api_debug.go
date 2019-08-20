@@ -423,6 +423,16 @@ func (api *DebugAPI) GetAccessibleState(from, to rpc.BlockNumber) (uint64, error
 	return 0, errors.New("no state found")
 }
 
+// GetBlockReceipts returns all transaction receipts of the specified block.
+func (api *DebugAPI) GetBlockReceipts(blockHash common.Hash) ([]map[string]interface{}, error) {
+	if receipts := api.eth.blockchain.GetReceiptsByHash(blockHash); receipts != nil {
+		if block := api.eth.blockchain.GetBlockByHash(blockHash); block != nil {
+			return ethapi.ToTxReceipts(api.eth.APIBackend.ChainConfig(), block.Header().Number.Uint64(), blockHash, receipts, block)
+		}
+	}
+	return nil, errors.New("unknown receipts")
+}
+
 // SetTrieFlushInterval configures how often in-memory tries are persisted
 // to disk. The value is in terms of block processing time, not wall clock.
 // If the value is shorter than the block generation time, or even 0 or negative,
