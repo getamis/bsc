@@ -453,6 +453,10 @@ func (ec *Client) SubscribeNewVotes(ctx context.Context, ch chan<- *types.VoteEn
 	return ec.c.EthSubscribe(ctx, ch, "newVotes")
 }
 
+func (ec *Client) SubscribeQueuedTransactions(ctx context.Context, ch chan<- *types.Transaction) (ethereum.Subscription, error) {
+	return ec.c.EthSubscribe(ctx, ch, "newQueuedTransactions")
+}
+
 // State Access
 
 // NetworkID returns the network ID for this client.
