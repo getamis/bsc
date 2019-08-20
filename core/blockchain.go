@@ -2732,6 +2732,8 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 	mgasps := float64(res.GasUsed) * 1000 / float64(elapsed)
 	chainMgaspsMeter.Update(time.Duration(mgasps))
 
+	bc.WriteTransferLogs(block.Hash(), block.NumberU64(), statedb.TransferLogs())
+
 	return &blockProcessingResult{
 		usedGas:  res.GasUsed,
 		procTime: proctime,
@@ -3525,4 +3527,20 @@ func (bc *BlockChain) PruneBlockHistory(blockHistory uint64) error {
 	}
 	log.Info("Prune block history successful", "oldtail", old, "tail", pruneHeight, "best", bestHeight, "history", blockHistory)
 	return nil
+}
+
+// WriteTransferLogs writes all the transfer logs belonging to a block.
+func (bc *BlockChain) WriteTransferLogs(hash common.Hash, number uint64, transferLogs []*types.TransferLog) {
+	bc.wg.Add(1)
+	defer bc.wg.Done()
+	rawdb.WriteTransferLogs(bc.db, hash, number, transferLogs)
+}
+
+// GetTransferLogs retrieves the transfer logs for all transactions in a given block.
+func (bc *BlockChain) GetTransferLogs(hash common.Hash) []*types.TransferLog {
+	number := rawdb.ReadHeaderNumber(bc.db, hash)
+	if number == nil {
+		return nil
+	}
+	return rawdb.ReadTransferLogs(bc.db, hash, *number)
 }
