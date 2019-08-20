@@ -5,6 +5,7 @@
 .PHONY: geth android ios evm all test truffle-test clean
 .PHONY: docker
 
+include main.mk
 GOBIN = ./build/bin
 GO ?= latest
 GORUN = go run
@@ -56,9 +57,15 @@ devtools:
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
-#? help: Build docker image
+#? docker: Build docker image
 docker:
-	docker build --pull -t bnb-chain/bsc:latest -f Dockerfile .
+	@docker build -f ./Dockerfile -t $(DOCKER_IMAGE):$(DOCKER_IMAGE_TAG) .
+	@docker tag $(DOCKER_IMAGE):$(DOCKER_IMAGE_TAG) $(DOCKER_IMAGE):latest
+
+#? docker.push: Push docker image
+docker.push:
+	@docker push $(DOCKER_IMAGE):$(DOCKER_IMAGE_TAG)
+	@docker push $(DOCKER_IMAGE):latest
 
 #? help: Get more info on make commands.
 help: Makefile
