@@ -256,6 +256,7 @@ type TxPool struct {
 	gasPrice     *big.Int
 	txFeed       event.Feed
 	reannoTxFeed event.Feed // Event feed for announcing transactions again
+	queuedTxFeed event.Feed
 	scope        event.SubscriptionScope
 	signer       types.Signer
 	mu           sync.RWMutex
@@ -484,6 +485,12 @@ func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscripti
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeReannoTxsEvent(ch chan<- ReannoTxsEvent) event.Subscription {
 	return pool.scope.Track(pool.reannoTxFeed.Subscribe(ch))
+}
+
+// SubscribeNewQueuedTxsEvent registers a subscription of NewQueuedTxsEvent and
+// starts sending event to the given channel.
+func (pool *TxPool) SubscribeNewQueuedTxsEvent(ch chan<- NewQueuedTxsEvent) event.Subscription {
+	return pool.scope.Track(pool.queuedTxFeed.Subscribe(ch))
 }
 
 // GasPrice returns the current gas price enforced by the transaction pool.
@@ -744,6 +751,8 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 
 	// already validated by this point
 	from, _ := types.Sender(pool.signer, tx)
+	// Broadcast a new tx anyway if it's valid
+	go pool.queuedTxFeed.Send(NewQueuedTxsEvent{types.Transactions{tx}})
 
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
