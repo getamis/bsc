@@ -30,6 +30,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/billy"
+	"github.com/holiman/uint256"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
@@ -42,8 +45,6 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/holiman/billy"
-	"github.com/holiman/uint256"
 )
 
 const (
@@ -328,6 +329,7 @@ type BlobPool struct {
 	discoverFeed event.Feed // Event feed to send out new tx events on pool discovery (reorg excluded)
 	insertFeed   event.Feed // Event feed to send out new tx events on pool inclusion (reorg included)
 	reannoTxFeed event.Feed // Event feed for announcing transactions again
+	queuedTxFeed event.Feed
 	scope        event.SubscriptionScope
 
 	// txValidationFn defaults to txpool.ValidateTransaction, but can be
@@ -1424,6 +1426,11 @@ func (p *BlobPool) add(tx *types.Transaction) (err error) {
 		}
 		return err
 	}
+
+	// already validated above
+	// Broadcast a new tx anyway if it's valid
+	go p.queuedTxFeed.Send(core.NewQueuedTxsEvent{Txs: types.Transactions{tx}})
+
 	// If the address is not yet known, request exclusivity to track the account
 	// only by this subpool until all transactions are evicted
 	from, _ := types.Sender(p.signer, tx) // already validated above
@@ -1762,6 +1769,12 @@ func (p *BlobPool) SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs bool
 // starts sending event to the given channel.
 func (p *BlobPool) SubscribeReannoTxsEvent(ch chan<- core.ReannoTxsEvent) event.Subscription {
 	return p.scope.Track(p.reannoTxFeed.Subscribe(ch))
+}
+
+// SubscribeNewQueuedTxsEvent registers a subscription of NewQueuedTxsEvent and
+// starts sending event to the given channel.
+func (p *BlobPool) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	return p.scope.Track(p.queuedTxFeed.Subscribe(ch))
 }
 
 // Nonce returns the next nonce of an account, with all transactions executable

@@ -606,6 +606,9 @@ func (b testBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscr
 func (b testBackend) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription {
 	panic("implement me")
 }
+func (b testBackend) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	panic("implement me")
+}
 func (b testBackend) SubscribeFinalizedHeaderEvent(ch chan<- core.FinalizedHeaderEvent) event.Subscription {
 	panic("implement me")
 }
