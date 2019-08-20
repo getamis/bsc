@@ -166,6 +166,11 @@ func (pool *VotePool) putIntoVotePool(vote *types.VoteEnvelope) bool {
 	return true
 }
 
+// no implementation for vote pool
+func (pool *VotePool) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	return nil
+}
+
 func (pool *VotePool) SubscribeNewVoteEvent(ch chan<- core.NewVoteEvent) event.Subscription {
 	return pool.scope.Track(pool.votesFeed.Subscribe(ch))
 }

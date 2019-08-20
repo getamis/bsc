@@ -385,6 +385,10 @@ func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount uint64, lastB
 	return b.gpo.FeeHistory(ctx, blockCount, lastBlock, rewardPercentiles)
 }
 
+func (b *EthAPIBackend) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	return b.eth.TxPool().SubscribeNewQueuedTxsEvent(ch)
+}
+
 func (b *EthAPIBackend) Chain() *core.BlockChain {
 	return b.eth.BlockChain()
 }
