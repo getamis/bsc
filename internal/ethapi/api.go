@@ -27,6 +27,9 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
+	"github.com/holiman/uint256"
+	"github.com/tyler-smith/go-bip39"
+
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/accounts/scwallet"
@@ -50,8 +53,6 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
-	"github.com/holiman/uint256"
-	"github.com/tyler-smith/go-bip39"
 )
 
 // max is a helper function which returns the larger of the two given integers.
@@ -1991,6 +1992,11 @@ func (s *TransactionAPI) GetTransactionReceiptsByBlockNumber(ctx context.Context
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNumber)
 	}
+
+	return ToTxReceipts(s.b.ChainConfig(), blockNumber, blockHash, receipts, block)
+}
+
+func ToTxReceipts(chainConfig *params.ChainConfig, blockNumber uint64, blockHash common.Hash, receipts types.Receipts, block *types.Block) ([]map[string]interface{}, error) {
 	txs := block.Transactions()
 	if len(txs) != len(receipts) {
 		return nil, errors.New("txs length doesn't equal to receipts' length")
@@ -1999,7 +2005,7 @@ func (s *TransactionAPI) GetTransactionReceiptsByBlockNumber(ctx context.Context
 	txReceipts := make([]map[string]interface{}, 0, len(txs))
 	for idx, receipt := range receipts {
 		tx := txs[idx]
-		signer := types.MakeSigner(s.b.ChainConfig(), block.Number(), block.Time())
+		signer := types.MakeSigner(chainConfig, block.Number(), block.Time())
 		from, _ := types.Sender(signer, tx)
 
 		fields := map[string]interface{}{
