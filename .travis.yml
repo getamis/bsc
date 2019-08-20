@@ -1,0 +1,43 @@
+language: go
+go_import_path: github.com/ethereum/go-ethereum
+jobs:
+  allow_failures:
+    - stage: build
+      os: osx
+      env:
+        - azure-osx
+
+  include:
+    # This builder only tests code linters on latest version of Go
+    - stage: lint
+      os: linux
+      arch: amd64
+      dist: noble
+      go: 1.24.x
+      env:
+        - lint
+      git:
+        submodules: false # avoid cloning ethereum/tests
+      script:
+        - go run build/ci.go lint
+
+    - stage: build
+      os: linux
+      arch: amd64
+      dist: noble
+      go: 1.24.x
+      env:
+        - GO111MODULE=on
+      git:
+        submodules: false # avoid cloning ethereum/tests
+      script:
+        - travis_wait 120 go run build/ci.go test $TEST_PACKAGES -timeout 120m
+        - cd tests && bash -x run-evm-tests.sh
+
+    - stage: Docker Image Release
+      script:
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin quay.io/amis
+        - make docker
+        - make docker.push
+      if: tag =~ ^v([0-9]+.)+[0-9]+
+      env: DOCKER_IMAGE_TAG="{$TRAVIS_TAG:1}"
