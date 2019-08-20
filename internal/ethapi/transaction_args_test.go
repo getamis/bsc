@@ -317,6 +317,9 @@ func (b *backendMock) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) eve
 func (b *backendMock) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription {
 	return nil
 }
+func (b *backendMock) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	return nil
+}
 func (b *backendMock) SubscribeFinalizedHeaderEvent(ch chan<- core.FinalizedHeaderEvent) event.Subscription {
 	return nil
 }

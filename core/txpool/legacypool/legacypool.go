@@ -217,6 +217,7 @@ type LegacyPool struct {
 	gasTip       atomic.Pointer[big.Int]
 	txFeed       event.Feed
 	reannoTxFeed event.Feed // Event feed for announcing transactions again
+	queuedTxFeed event.Feed
 	scope        event.SubscriptionScope
 	signer       types.Signer
 	mu           sync.RWMutex
@@ -460,6 +461,12 @@ func (pool *LegacyPool) SubscribeTransactions(ch chan<- core.NewTxsEvent) event.
 // starts sending event to the given channel.
 func (pool *LegacyPool) SubscribeReannoTxsEvent(ch chan<- core.ReannoTxsEvent) event.Subscription {
 	return pool.scope.Track(pool.reannoTxFeed.Subscribe(ch))
+}
+
+// SubscribeNewQueuedTxsEvent registers a subscription of NewQueuedTxsEvent and
+// starts sending event to the given channel.
+func (pool *LegacyPool) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	return pool.scope.Track(pool.queuedTxFeed.Subscribe(ch))
 }
 
 // SetGasTip updates the minimum gas tip required by the transaction pool for a
@@ -725,6 +732,8 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	}
 	// already validated by this point
 	from, _ := types.Sender(pool.signer, tx)
+	// Broadcast a new tx anyway if it's valid
+	go pool.queuedTxFeed.Send(core.NewQueuedTxsEvent{Txs: types.Transactions{tx}})
 
 	// If the address is not yet known, request exclusivity to track the account
 	// only by this subpool until all transactions are evicted
