@@ -465,6 +465,12 @@ web3._extend({
 			params: 2,
 			inputFormatter:[web3._extend.formatters.inputBlockNumberFormatter, web3._extend.formatters.inputBlockNumberFormatter],
 		}),
+		new web3._extend.Method({
+			name: 'getBlockReceipts',
+			call: 'debug_getBlockReceipts',
+			params: 1,
+			inputFormatter: [null],
+		}),
 	],
 	properties: []
 });
