@@ -1481,6 +1481,12 @@ func (pool *BlobPool) SubscribeReannoTxsEvent(ch chan<- core.ReannoTxsEvent) eve
 	panic("not supported")
 }
 
+// SubscribeNewQueuedTxsEvent registers a subscription of NewQueuedTxsEvent and
+// starts sending event to the given channel.
+func (pool *BlobPool) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	panic("not supported")
+}
+
 // Nonce returns the next nonce of an account, with all transactions executable
 // by the pool already applied on top.
 func (p *BlobPool) Nonce(addr common.Address) uint64 {

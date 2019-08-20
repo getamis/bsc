@@ -117,6 +117,10 @@ type SubPool interface {
 	// ReannoTxsEvent and send events to the given channel.
 	SubscribeReannoTxsEvent(chan<- core.ReannoTxsEvent) event.Subscription
 
+	// SubscribeNewQueuedTxsEvent registers a subscription of NewQueuedTxsEvent and
+	// starts sending event to the given channel.
+	SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription
+
 	// Nonce returns the next nonce of an account, with all transactions executable
 	// by the pool already applied on top.
 	Nonce(addr common.Address) uint64
