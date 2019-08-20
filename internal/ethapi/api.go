@@ -1874,6 +1874,11 @@ func (api *TransactionAPI) GetTransactionReceiptsByBlockNumber(ctx context.Conte
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNumber)
 	}
+
+	return ToTxReceipts(api.b.ChainConfig(), blockNumber, blockHash, receipts, block)
+}
+
+func ToTxReceipts(chainConfig *params.ChainConfig, blockNumber uint64, blockHash common.Hash, receipts types.Receipts, block *types.Block) ([]map[string]interface{}, error) {
 	txs := block.Transactions()
 	if len(txs) != len(receipts) {
 		return nil, errors.New("txs length doesn't equal to receipts' length")
@@ -1882,7 +1887,7 @@ func (api *TransactionAPI) GetTransactionReceiptsByBlockNumber(ctx context.Conte
 	txReceipts := make([]map[string]interface{}, 0, len(txs))
 	for idx, receipt := range receipts {
 		tx := txs[idx]
-		signer := types.MakeSigner(api.b.ChainConfig(), block.Number(), block.Time())
+		signer := types.MakeSigner(chainConfig, block.Number(), block.Time())
 		from, _ := types.Sender(signer, tx)
 
 		fields := map[string]interface{}{
