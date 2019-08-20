@@ -359,6 +359,11 @@ func (t *testVotePool) SubscribeNewVoteEvent(ch chan<- core.NewVoteEvent) event.
 	return t.voteFeed.Subscribe(ch)
 }
 
+// no implementation for vote pool
+func (t *testVotePool) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	return nil
+}
+
 var (
 	emptyBlob          = kzg4844.Blob{}
 	emptyBlobCommit, _ = kzg4844.BlobToCommitment(emptyBlob)
