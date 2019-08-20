@@ -386,6 +386,14 @@ func (ec *Client) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header)
 	return ec.c.EthSubscribe(ctx, ch, "newHeads")
 }
 
+func (ec *Client) SubscribePendingTransactions(ctx context.Context, ch chan<- common.Hash) (ethereum.Subscription, error) {
+	return ec.c.EthSubscribe(ctx, ch, "newPendingTransactions")
+}
+
+func (ec *Client) SubscribeQueuedTransactions(ctx context.Context, ch chan<- *types.Transaction) (ethereum.Subscription, error) {
+	return ec.c.EthSubscribe(ctx, ch, "newQueuedTransactions")
+}
+
 // State Access
 
 // NetworkID returns the network ID (also known as the chain ID) for this chain.
