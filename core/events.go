@@ -29,6 +29,9 @@ type ReannoTxsEvent struct{ Txs []*types.Transaction }
 // NewSealedBlockEvent is posted when a block has been sealed.
 type NewSealedBlockEvent struct{ Block *types.Block }
 
+// NewQueuedTxsEvent is posted when a batch of transactions enter the transaction pool.
+type NewQueuedTxsEvent struct{ Txs []*types.Transaction }
+
 // NewMinedBlockEvent is posted when a block has been mined.
 type NewMinedBlockEvent struct{ Block *types.Block }
 
