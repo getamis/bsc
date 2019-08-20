@@ -912,6 +912,12 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash, number u
 func (fb *filterBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return nullSubscription()
 }
+func (fb *filterBackend) SubscribeNewQueuedTxsEvent(ch chan<- core.NewQueuedTxsEvent) event.Subscription {
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		<-quit
+		return nil
+	})
+}
 
 func (fb *filterBackend) SubscribeNewVoteEvent(ch chan<- core.NewVoteEvent) event.Subscription {
 	return nullSubscription()
