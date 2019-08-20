@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -268,6 +269,14 @@ func storageRangeAt(statedb *state.StateDB, root common.Hash, address common.Add
 	return result, nil
 }
 
+// GetTotalDifficulty returns the total difficulty of the specified block.
+func (api *DebugAPI) GetTotalDifficulty(blockHash common.Hash) *big.Int {
+	if header := api.eth.blockchain.GetHeaderByHash(blockHash); header != nil {
+		return api.eth.blockchain.GetTd(blockHash, header.Number.Uint64())
+	}
+	return nil
+}
+
 // GetModifiedAccountsByNumber returns all accounts that have changed between the
 // two blocks specified. A change is defined as a difference in nonce, balance,
 // code hash, or storage hash.
@@ -421,6 +430,16 @@ func (api *DebugAPI) GetAccessibleState(from, to rpc.BlockNumber) (uint64, error
 		}
 	}
 	return 0, errors.New("no state found")
+}
+
+// GetBlockReceipts returns all transaction receipts of the specified block.
+func (api *DebugAPI) GetBlockReceipts(blockHash common.Hash) ([]map[string]interface{}, error) {
+	if receipts := api.eth.blockchain.GetReceiptsByHash(blockHash); receipts != nil {
+		if block := api.eth.blockchain.GetBlockByHash(blockHash); block != nil {
+			return ethapi.ToTxReceipts(api.eth.APIBackend.ChainConfig(), block.Header().Number.Uint64(), blockHash, receipts, block)
+		}
+	}
+	return nil, errors.New("unknown receipts")
 }
 
 // SetTrieFlushInterval configures how often in-memory tries are persisted
