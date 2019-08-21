@@ -111,4 +111,6 @@ type StateDB interface {
 	IntermediateRoot(deleteEmptyObjects bool) common.Hash
 
 	IsAddressInMutations(addr common.Address) bool
+
+	AddTransferLog(*types.TransferLog)
 }
