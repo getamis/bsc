@@ -19,6 +19,8 @@ package vm
 import (
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/stateless"
@@ -26,7 +28,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie/utils"
-	"github.com/holiman/uint256"
 )
 
 // StateDB is an EVM database for full state querying.
@@ -109,6 +110,8 @@ type StateDB interface {
 	// Finalise must be invoked at the end of a transaction
 	Finalise(bool)
 	IntermediateRoot(deleteEmptyObjects bool) common.Hash
+
+	AddTransferLog(*types.TransferLog)
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM
