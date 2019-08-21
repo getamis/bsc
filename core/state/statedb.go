@@ -168,6 +168,9 @@ type StateDB struct {
 	StorageLoaded  int          // Number of storage slots retrieved from the database during the state transition
 	StorageUpdated atomic.Int64 // Number of storage slots updated during the state transition
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
+
+	// transferLogs records trasfer logs for each transaction.
+	transferLogs map[common.Hash][]*types.TransferLog
 }
 
 // New creates a new state from a given trie.
@@ -191,6 +194,7 @@ func NewWithReader(root common.Hash, db Database, reader Reader) (*StateDB, erro
 		mutations:            make(map[common.Address]*mutation, defaultNumOfSlots),
 		logs:                 make(map[common.Hash][]*types.Log),
 		preimages:            make(map[common.Hash][]byte),
+		transferLogs:         make(map[common.Hash][]*types.TransferLog),
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		blockAccessList:      nil,
@@ -321,6 +325,25 @@ func (s *StateDB) GetLogs(hash common.Hash, blockNumber uint64, blockHash common
 func (s *StateDB) Logs() []*types.Log {
 	var logs []*types.Log
 	for _, lgs := range s.logs {
+		logs = append(logs, lgs...)
+	}
+	return logs
+}
+
+func (s *StateDB) AddTransferLog(transferLog *types.TransferLog) {
+	s.journal.append(addTransferLogChange{txhash: s.thash})
+
+	transferLog.TxHash = s.thash
+	s.transferLogs[s.thash] = append(s.transferLogs[s.thash], transferLog)
+}
+
+func (s *StateDB) GetTransferLogs(hash common.Hash) []*types.TransferLog {
+	return s.transferLogs[hash]
+}
+
+func (s *StateDB) TransferLogs() []*types.TransferLog {
+	var logs []*types.TransferLog
+	for _, lgs := range s.transferLogs {
 		logs = append(logs, lgs...)
 	}
 	return logs
@@ -826,6 +849,7 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		logs:                 make(map[common.Hash][]*types.Log, len(s.logs)),
 		logSize:              s.logSize,
 		preimages:            maps.Clone(s.preimages),
+		transferLogs:         make(map[common.Hash][]*types.TransferLog),
 
 		// Do we need to copy the access list and transient storage?
 		// In practice: No. At the start of a transaction, these two lists are empty.
@@ -867,6 +891,11 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 			*cpy[i] = *l
 		}
 		state.logs[hash] = cpy
+	}
+
+	for hash, transferLogs := range s.transferLogs {
+		state.transferLogs[hash] = make([]*types.TransferLog, len(transferLogs))
+		copy(state.transferLogs[hash], transferLogs)
 	}
 
 	state.prefetcher = s.prefetcher
