@@ -319,3 +319,11 @@ func (s *hookedStateDB) Finalise(deleteEmptyObjects bool) {
 func (s *hookedStateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	return s.inner.IntermediateRoot(deleteEmptyObjects)
 }
+
+func (s *hookedStateDB) AddTransferLog(log *types.TransferLog) {
+	// The inner will modify the log (add fields), so invoke that first
+	s.inner.AddTransferLog(log)
+	if s.hooks.OnTransferLog != nil {
+		s.hooks.OnTransferLog(log)
+	}
+}
