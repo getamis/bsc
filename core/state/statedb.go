@@ -158,6 +158,8 @@ type StateDB struct {
 
 	// Testing hooks
 	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
+	// transferLogs records trasfer logs for each transaction.
+	transferLogs map[common.Hash][]*types.TransferLog
 }
 
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
@@ -186,6 +188,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		stateObjectsDestruct: make(map[common.Address]*types.StateAccount, defaultNumOfSlots),
 		logs:                 make(map[common.Hash][]*types.Log),
 		preimages:            make(map[common.Hash][]byte),
+		transferLogs:         make(map[common.Hash][]*types.TransferLog),
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
@@ -375,6 +378,25 @@ func (s *StateDB) GetLogs(hash common.Hash, blockNumber uint64, blockHash common
 func (s *StateDB) Logs() []*types.Log {
 	var logs []*types.Log
 	for _, lgs := range s.logs {
+		logs = append(logs, lgs...)
+	}
+	return logs
+}
+
+func (self *StateDB) AddTransferLog(transferLog *types.TransferLog) {
+	self.journal.append(addTransferLogChange{txhash: self.thash})
+
+	transferLog.TxHash = self.thash
+	self.transferLogs[self.thash] = append(self.transferLogs[self.thash], transferLog)
+}
+
+func (self *StateDB) GetTransferLogs(hash common.Hash) []*types.TransferLog {
+	return self.transferLogs[hash]
+}
+
+func (self *StateDB) TransferLogs() []*types.TransferLog {
+	var logs []*types.TransferLog
+	for _, lgs := range self.transferLogs {
 		logs = append(logs, lgs...)
 	}
 	return logs
@@ -879,12 +901,13 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		stateObjectsDestruct: make(map[common.Address]*types.StateAccount, len(s.stateObjectsDestruct)),
 		storagePool:          s.storagePool,
 		// writeOnSharedStorage: s.writeOnSharedStorage,
-		refund:    s.refund,
-		logs:      make(map[common.Hash][]*types.Log, len(s.logs)),
-		logSize:   s.logSize,
-		preimages: make(map[common.Hash][]byte, len(s.preimages)),
-		journal:   newJournal(),
-		hasher:    crypto.NewKeccakState(),
+		refund:       s.refund,
+		logs:         make(map[common.Hash][]*types.Log, len(s.logs)),
+		logSize:      s.logSize,
+		preimages:    make(map[common.Hash][]byte, len(s.preimages)),
+		transferLogs: make(map[common.Hash][]*types.TransferLog),
+		journal:      newJournal(),
+		hasher:       crypto.NewKeccakState(),
 
 		// In order for the block producer to be able to use and make additions
 		// to the snapshot tree, we need to copy that as well. Otherwise, any
@@ -959,6 +982,11 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		state.accessList = s.accessList.Copy()
 	}
 	state.transientStorage = s.transientStorage.Copy()
+
+	for hash, transferLogs := range s.transferLogs {
+		state.transferLogs[hash] = make([]*types.TransferLog, len(transferLogs))
+		copy(state.transferLogs[hash], transferLogs)
+	}
 
 	state.prefetcher = s.prefetcher
 	if s.prefetcher != nil && !doPrefetch {
