@@ -308,3 +308,11 @@ func (s *hookedStateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 func (s *hookedStateDB) IsAddressInMutations(addr common.Address) bool {
 	return s.inner.IsAddressInMutations(addr)
 }
+
+func (s *hookedStateDB) AddTransferLog(log *types.TransferLog) {
+	// The inner will modify the log (add fields), so invoke that first
+	s.inner.AddTransferLog(log)
+	if s.hooks.OnTransferLog != nil {
+		s.hooks.OnTransferLog(log)
+	}
+}
