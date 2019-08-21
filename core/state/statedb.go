@@ -146,6 +146,9 @@ type StateDB struct {
 	StorageUpdated int
 	AccountDeleted int
 	StorageDeleted int
+
+	// transferLogs records trasfer logs for each transaction.
+	transferLogs map[common.Hash][]*types.TransferLog
 }
 
 // New creates a new state from a given trie.
@@ -173,6 +176,7 @@ func newStateDB(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, 
 		stateObjectsDirty:   make(map[common.Address]struct{}, defaultNumOfSlots),
 		logs:                make(map[common.Hash][]*types.Log, defaultNumOfSlots),
 		preimages:           make(map[common.Hash][]byte),
+		transferLogs:        make(map[common.Hash][]*types.TransferLog),
 		journal:             newJournal(),
 		hasher:              crypto.NewKeccakState(),
 	}
@@ -377,6 +381,25 @@ func (s *StateDB) GetLogs(hash common.Hash, blockHash common.Hash) []*types.Log 
 func (s *StateDB) Logs() []*types.Log {
 	var logs []*types.Log
 	for _, lgs := range s.logs {
+		logs = append(logs, lgs...)
+	}
+	return logs
+}
+
+func (self *StateDB) AddTransferLog(transferLog *types.TransferLog) {
+	self.journal.append(addTransferLogChange{txhash: self.thash})
+
+	transferLog.TxHash = self.thash
+	self.transferLogs[self.thash] = append(self.transferLogs[self.thash], transferLog)
+}
+
+func (self *StateDB) GetTransferLogs(hash common.Hash) []*types.TransferLog {
+	return self.transferLogs[hash]
+}
+
+func (self *StateDB) TransferLogs() []*types.TransferLog {
+	var logs []*types.TransferLog
+	for _, lgs := range self.transferLogs {
 		logs = append(logs, lgs...)
 	}
 	return logs
@@ -854,6 +877,7 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		logs:                make(map[common.Hash][]*types.Log, len(s.logs)),
 		logSize:             s.logSize,
 		preimages:           make(map[common.Hash][]byte, len(s.preimages)),
+		transferLogs:        make(map[common.Hash][]*types.TransferLog),
 		journal:             newJournal(),
 		hasher:              crypto.NewKeccakState(),
 	}
@@ -906,6 +930,11 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 	// to not blow up if we ever decide copy it in the middle of a transaction
 	if s.accessList != nil {
 		state.accessList = s.accessList.Copy()
+	}
+
+	for hash, transferLogs := range s.transferLogs {
+		state.transferLogs[hash] = make([]*types.TransferLog, len(transferLogs))
+		copy(state.transferLogs[hash], transferLogs)
 	}
 
 	state.prefetcher = s.prefetcher
