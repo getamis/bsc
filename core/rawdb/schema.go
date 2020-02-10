@@ -116,16 +116,20 @@ const (
 
 	// freezerDifficultyTable indicates the name of the freezer total difficulty table.
 	freezerDifficultyTable = "diffs"
+
+	// freezerTransferLogTable indicates the name of the freezer transfer logs table.
+	freezerTransferLogTable = "transfers"
 )
 
 // FreezerNoSnappy configures whether compression is disabled for the ancient-tables.
 // Hashes and difficulties don't compress well.
 var FreezerNoSnappy = map[string]bool{
-	freezerHeaderTable:     false,
-	freezerHashTable:       true,
-	freezerBodiesTable:     false,
-	freezerReceiptTable:    false,
-	freezerDifficultyTable: true,
+	freezerHeaderTable:      false,
+	freezerHashTable:        true,
+	freezerBodiesTable:      false,
+	freezerReceiptTable:     false,
+	freezerDifficultyTable:  true,
+	freezerTransferLogTable: false,
 }
 
 // LegacyTxLookupEntry is the legacy TxLookupEntry definition with some unnecessary
@@ -176,6 +180,11 @@ func blockBodyKey(number uint64, hash common.Hash) []byte {
 // blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
 func blockReceiptsKey(number uint64, hash common.Hash) []byte {
 	return append(append(blockReceiptsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
+}
+
+// blockTransferLogsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
+func blockTransferLogsKey(number uint64, hash common.Hash) []byte {
+	return append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
 }
 
 // txLookupKey = txLookupPrefix + hash

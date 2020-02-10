@@ -466,8 +466,11 @@ func TestAncientStorage(t *testing.T) {
 	if blob := ReadTdRLP(db, hash, number); len(blob) > 0 {
 		t.Fatalf("non existent td returned")
 	}
+	if blob := ReadTransferLogsRLP(db, hash, number); len(blob) > 0 {
+		t.Fatalf("non existent transfer logs returned")
+	}
 	// Write and verify the header in the database
-	WriteAncientBlock(db, block, nil, big.NewInt(100))
+	WriteAncientBlock(db, block, nil, big.NewInt(100), nil)
 	if blob := ReadHeaderRLP(db, hash, number); len(blob) == 0 {
 		t.Fatalf("no header returned")
 	}
@@ -479,6 +482,9 @@ func TestAncientStorage(t *testing.T) {
 	}
 	if blob := ReadTdRLP(db, hash, number); len(blob) == 0 {
 		t.Fatalf("no td returned")
+	}
+	if blob := ReadTransferLogsRLP(db, hash, number); len(blob) == 0 {
+		t.Fatalf("no transfer logs returned")
 	}
 	// Use a fake hash for data retrieval, nothing should be returned.
 	fakeHash := common.BytesToHash([]byte{0x01, 0x02, 0x03})
@@ -493,6 +499,52 @@ func TestAncientStorage(t *testing.T) {
 	}
 	if blob := ReadTdRLP(db, fakeHash, number); len(blob) != 0 {
 		t.Fatalf("invalid td returned")
+	}
+	if blob := ReadTransferLogsRLP(db, fakeHash, number); len(blob) != 0 {
+		t.Fatalf("invalid transfer logs returned")
+	}
+}
+
+func TestAncientTransferLogStorageTransferLog(t *testing.T) {
+	// Freezer style fast import the chain.
+	frdir, err := ioutil.TempDir("", "")
+	if err != nil {
+		t.Fatalf("failed to create temp freezer dir: %v", err)
+	}
+	defer os.Remove(frdir)
+
+	db, err := NewDatabaseWithFreezer(NewMemoryDatabase(), frdir, "")
+	if err != nil {
+		t.Fatalf("failed to create database with ancient backend")
+	}
+	// Create a test block
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:      big.NewInt(0),
+		Extra:       []byte("test block"),
+		UncleHash:   types.EmptyUncleHash,
+		TxHash:      types.EmptyRootHash,
+		ReceiptHash: types.EmptyRootHash,
+	})
+	hash, number := block.Hash(), block.NumberU64()
+	// Write with nil transfer logs, should get nil transfer logs.
+	WriteAncientBlock(db, block, nil, big.NewInt(100), nil)
+	if tlogs := ReadTransferLogs(db, hash, number); tlogs != nil {
+		t.Fatalf("should return nil transfer logs")
+	}
+
+	// Create a test block
+	block2 := types.NewBlockWithHeader(&types.Header{
+		Number:      big.NewInt(1),
+		Extra:       []byte("test block"),
+		UncleHash:   types.EmptyUncleHash,
+		TxHash:      types.EmptyRootHash,
+		ReceiptHash: types.EmptyRootHash,
+	})
+	hash, number = block2.Hash(), block2.NumberU64()
+	// Write with nil transfer logs, should get nil transfer logs.
+	WriteAncientBlock(db, block2, nil, big.NewInt(101), []*types.TransferLog{})
+	if tlogs := ReadTransferLogs(db, hash, number); tlogs == nil {
+		t.Fatalf("invalid transfer logs returned")
 	}
 }
 

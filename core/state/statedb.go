@@ -118,7 +118,7 @@ type StateDB struct {
 	SnapshotStorageReads time.Duration
 	SnapshotCommits      time.Duration
 
-	// transferLogs records trasfer logs for each transaction.
+	// transferLogs records transfer logs for each transaction.
 	transferLogs map[common.Hash][]*types.TransferLog
 }
 

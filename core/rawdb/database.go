@@ -100,7 +100,7 @@ func (db *nofreezedb) AncientSize(kind string) (uint64, error) {
 }
 
 // AppendAncient returns an error as we don't have a backing chain freezer.
-func (db *nofreezedb) AppendAncient(number uint64, hash, header, body, receipts, td []byte) error {
+func (db *nofreezedb) AppendAncient(number uint64, hash, header, body, receipts, td, transferLogs []byte) error {
 	return errNotSupported
 }
 
@@ -300,13 +300,15 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		bloomBits       stat
 		cliqueSnaps     stat
 		parliaSnaps     stat
+		transferLog     stat
 
 		// Ancient store statistics
-		ancientHeadersSize  common.StorageSize
-		ancientBodiesSize   common.StorageSize
-		ancientReceiptsSize common.StorageSize
-		ancientTdsSize      common.StorageSize
-		ancientHashesSize   common.StorageSize
+		ancientHeadersSize      common.StorageSize
+		ancientBodiesSize       common.StorageSize
+		ancientReceiptsSize     common.StorageSize
+		ancientTdsSize          common.StorageSize
+		ancientHashesSize       common.StorageSize
+		ancientTransferLogsSize common.StorageSize
 
 		// Les statistic
 		chtTrieNodes   stat
@@ -344,6 +346,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			tries.Add(size)
 		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
 			codes.Add(size)
+		case bytes.HasPrefix(key, blockTranferLogsPrefix) && len(key) == (len(blockTranferLogsPrefix)+8+common.HashLength):
+			transferLog.Add(size)
 		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
 			txLookups.Add(size)
 		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
@@ -396,8 +400,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		}
 	}
 	// Inspect append-only file store then.
-	ancientSizes := []*common.StorageSize{&ancientHeadersSize, &ancientBodiesSize, &ancientReceiptsSize, &ancientHashesSize, &ancientTdsSize}
-	for i, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
+	ancientSizes := []*common.StorageSize{&ancientHeadersSize, &ancientBodiesSize, &ancientReceiptsSize, &ancientHashesSize, &ancientTdsSize, &ancientTransferLogsSize}
+	for i, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable, freezerTransferLogTable} {
 		if size, err := db.AncientSize(category); err == nil {
 			*ancientSizes[i] += common.StorageSize(size)
 			total += common.StorageSize(size)
@@ -413,6 +417,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Key-Value store", "Headers", headers.Size(), headers.Count()},
 		{"Key-Value store", "Bodies", bodies.Size(), bodies.Count()},
 		{"Key-Value store", "Receipt lists", receipts.Size(), receipts.Count()},
+		{"Key-Value store", "Transfer logs", transferLog.Size(), transferLog.Count()},
 		{"Key-Value store", "Difficulties", tds.Size(), tds.Count()},
 		{"Key-Value store", "Block number->hash", numHashPairings.Size(), numHashPairings.Count()},
 		{"Key-Value store", "Block hash->number", hashNumPairings.Size(), hashNumPairings.Count()},
@@ -430,6 +435,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Ancient store", "Headers", ancientHeadersSize.String(), ancients.String()},
 		{"Ancient store", "Bodies", ancientBodiesSize.String(), ancients.String()},
 		{"Ancient store", "Receipt lists", ancientReceiptsSize.String(), ancients.String()},
+		{"Ancient store", "Transfer logs", ancientTransferLogsSize.String(), ancients.String()},
 		{"Ancient store", "Difficulties", ancientTdsSize.String(), ancients.String()},
 		{"Ancient store", "Block number->hash", ancientHashesSize.String(), ancients.String()},
 		{"Light client", "CHT trie nodes", chtTrieNodes.Size(), chtTrieNodes.Count()},

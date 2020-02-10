@@ -631,16 +631,47 @@ func DeleteReceipts(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 	}
 }
 
+// ReadTransferLogsRLP retrieves all the transfer logs belonging to a block in RLP encoding.
+func ReadTransferLogsRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue {
+	// First try to look up the data in ancient database. Extra hash
+	// comparison is necessary since ancient database only maintains
+	// the canonical data.
+	data, _ := db.Ancient(freezerTransferLogTable, number)
+	if len(data) > 0 {
+		h, _ := db.Ancient(freezerHashTable, number)
+		if common.BytesToHash(h) == hash {
+			return data
+		}
+	}
+	// Then try to look up the data in leveldb.
+	data, _ = db.Get(blockTransferLogsKey(number, hash))
+	if len(data) > 0 {
+		return data
+	}
+	// In the background freezer is moving data from leveldb to flatten files.
+	// So during the first check for ancient db, the data is not yet in there,
+	// but when we reach into leveldb, the data was already moved. That would
+	// result in a not found error.
+	data, _ = db.Ancient(freezerTransferLogTable, number)
+	if len(data) > 0 {
+		h, _ := db.Ancient(freezerHashTable, number)
+		if common.BytesToHash(h) == hash {
+			return data
+		}
+	}
+	return nil // Can't find the data anywhere.
+}
+
 // ReadTransferLogs retrieves all the transfer logs belonging to a block.
-func ReadTransferLogs(db ethdb.KeyValueReader, hash common.Hash, number uint64) []*types.TransferLog {
+func ReadTransferLogs(db ethdb.Reader, hash common.Hash, number uint64) []*types.TransferLog {
 	// Retrieve the flattened transfer log slice
-	data, _ := db.Get(append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...))
+	data := ReadTransferLogsRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
 	}
 	transferLogs := []*types.TransferLog{}
 	if err := rlp.DecodeBytes(data, &transferLogs); err != nil {
-		log.Error("Invalid transfer log array RLP", "hash", hash, "err", err)
+		log.Error("Invalid transfer log array RLP", "hash", hash, "number", number, "err", err)
 		return nil
 	}
 	return transferLogs
@@ -650,19 +681,27 @@ func ReadTransferLogs(db ethdb.KeyValueReader, hash common.Hash, number uint64) 
 func WriteTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64, transferLogs []*types.TransferLog) {
 	bytes, err := rlp.EncodeToBytes(transferLogs)
 	if err != nil {
-		log.Crit("Failed to encode block transfer logs", "err", err)
+		log.Crit("Failed to encode block transfer logs", "hash", hash, "number", number, "err", err)
 	}
 	// Store the flattened transfer log slice
-	key := append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
-	if err := db.Put(key, bytes); err != nil {
-		log.Crit("Failed to store block transfer logs", "err", err)
+	if err := db.Put(blockTransferLogsKey(number, hash), bytes); err != nil {
+		log.Crit("Failed to store block transfer logs", "hash", hash, "number", number, "err", err)
+	}
+}
+
+// WriteMissingTransferLogs stores missing transfer logs message for a block.
+func WriteMissingTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
+	bytes := []byte("missing transfer logs")
+	// Store the flattened transfer log slice
+	if err := db.Put(blockTransferLogsKey(number, hash), bytes); err != nil {
+		log.Crit("Failed to store block transfer logs", "hash", hash, "number", number, "err", err)
 	}
 }
 
 // DeleteTransferLogs removes all transfer logs associated with a block hash.
 func DeleteTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	if err := db.Delete(append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)); err != nil {
-		log.Crit("Failed to delete block transfer logs", "err", err)
+	if err := db.Delete(blockTransferLogsKey(number, hash)); err != nil {
+		log.Crit("Failed to delete block transfer logs", "hash", hash, "number", number, "err", err)
 	}
 }
 
@@ -691,7 +730,7 @@ func WriteBlock(db ethdb.KeyValueWriter, block *types.Block) {
 }
 
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.
-func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts types.Receipts, td *big.Int) int {
+func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts types.Receipts, td *big.Int, transferLogs []*types.TransferLog) int {
 	// Encode all block components to RLP format.
 	headerBlob, err := rlp.EncodeToBytes(block.Header())
 	if err != nil {
@@ -713,12 +752,24 @@ func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts type
 	if err != nil {
 		log.Crit("Failed to RLP encode block total difficulty", "err", err)
 	}
+	// Transfer logs might be nil when fast sync.
+	// To keep complete ancient table, we append the specific string to indicate nil transfer logs.
+	var transferLogBlob []byte
+	if transferLogs != nil {
+		var err error
+		transferLogBlob, err = rlp.EncodeToBytes(transferLogs)
+		if err != nil {
+			log.Crit("Failed to RLP encode block transfer logs", "err", err)
+		}
+	} else {
+		transferLogBlob = []byte("missing transfer logs")
+	}
 	// Write all blob to flatten files.
-	err = db.AppendAncient(block.NumberU64(), block.Hash().Bytes(), headerBlob, bodyBlob, receiptBlob, tdBlob)
+	err = db.AppendAncient(block.NumberU64(), block.Hash().Bytes(), headerBlob, bodyBlob, receiptBlob, tdBlob, transferLogBlob)
 	if err != nil {
 		log.Crit("Failed to write block data to ancient store", "err", err)
 	}
-	return len(headerBlob) + len(bodyBlob) + len(receiptBlob) + len(tdBlob) + common.HashLength
+	return len(headerBlob) + len(bodyBlob) + len(receiptBlob) + len(tdBlob) + len(transferLogBlob) + common.HashLength
 }
 
 // DeleteBlock removes all block data associated with a hash.
