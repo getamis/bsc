@@ -394,11 +394,7 @@ func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, sta
 
 // GetTransferLogs is a debug API function that returns the transfer logs for a block hash, if known.
 func (api *PrivateDebugAPI) GetTransferLogs(ctx context.Context, hash common.Hash) ([]*types.TransferLog, error) {
-	number := rawdb.ReadHeaderNumber(api.eth.ChainDb(), hash)
-	if number == nil {
-		return nil, errors.New("unknown transfer logs")
-	}
-	if transferLogs := rawdb.ReadTransferLogs(api.eth.ChainDb(), hash, *number); transferLogs != nil {
+	if transferLogs := api.eth.blockchain.GetTransferLogs(hash); transferLogs != nil {
 		return transferLogs, nil
 	}
 	return nil, errors.New("unknown transfer logs")
@@ -459,8 +455,11 @@ func storageRangeAt(st state.Trie, start []byte, maxResult int) (StorageRangeRes
 }
 
 // GetTotalDifficulty returns the total difficulty of the specified block.
-func (api *PrivateDebugAPI) GetTotalDifficulty(blockHash common.Hash) *big.Int {
-	return api.eth.blockchain.GetTdByHash(blockHash)
+func (api *PrivateDebugAPI) GetTotalDifficulty(blockHash common.Hash) (*big.Int, error) {
+	if td := api.eth.blockchain.GetTdByHash(blockHash); td != nil {
+		return td, nil
+	}
+	return nil, errors.New("unknown total difficulty")
 }
 
 // GetModifiedAccountsByNumber returns all accounts that have changed between the
@@ -547,6 +546,9 @@ func (api *PrivateDebugAPI) getModifiedAccounts(startBlock, endBlock *types.Bloc
 }
 
 // GetBlockReceipts returns all transaction receipts of the specified block.
-func (api *PrivateDebugAPI) GetBlockReceipts(blockHash common.Hash) types.Receipts {
-	return api.eth.blockchain.GetReceiptsByHash(blockHash)
+func (api *PrivateDebugAPI) GetBlockReceipts(blockHash common.Hash) (types.Receipts, error) {
+	if receipts := api.eth.blockchain.GetReceiptsByHash(blockHash); receipts != nil {
+		return receipts, nil
+	}
+	return nil, errors.New("unknown receipts")
 }
