@@ -30,6 +30,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/common/prque"
@@ -85,6 +86,7 @@ const (
 	bodyCacheLimit         = 256
 	blockCacheLimit        = 256
 	diffLayerCacheLimit    = 1024
+	transferLogsCacheLimit = 32
 	diffLayerRLPCacheLimit = 256
 	receiptsCacheLimit     = 10000
 	txLookupCacheLimit     = 1024
@@ -211,14 +213,15 @@ type BlockChain struct {
 	currentFastBlock      atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 	highestVerifiedHeader atomic.Value
 
-	stateCache    state.Database // State database to reuse between imports (contains state cache)
-	bodyCache     *lru.Cache     // Cache for the most recent block bodies
-	bodyRLPCache  *lru.Cache     // Cache for the most recent block bodies in RLP encoded format
-	receiptsCache *lru.Cache     // Cache for the most recent receipts per block
-	blockCache    *lru.Cache     // Cache for the most recent entire blocks
-	txLookupCache *lru.Cache     // Cache for the most recent transaction lookup data.
-	futureBlocks  *lru.Cache     // future blocks are blocks added for later processing
-	badBlockCache *lru.Cache     // Cache for the blocks that failed to pass MPT root verification
+	stateCache        state.Database // State database to reuse between imports (contains state cache)
+	bodyCache         *lru.Cache     // Cache for the most recent block bodies
+	bodyRLPCache      *lru.Cache     // Cache for the most recent block bodies in RLP encoded format
+	receiptsCache     *lru.Cache     // Cache for the most recent receipts per block
+	transferLogsCache *lru.Cache     // Cache for the most recent receipts per block
+	blockCache        *lru.Cache     // Cache for the most recent entire blocks
+	txLookupCache     *lru.Cache     // Cache for the most recent transaction lookup data.
+	futureBlocks      *lru.Cache     // future blocks are blocks added for later processing
+	badBlockCache     *lru.Cache     // Cache for the blocks that failed to pass MPT root verification
 
 	// trusted diff layers
 	diffLayerCache             *lru.Cache   // Cache for the diffLayers
@@ -267,6 +270,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bodyCache, _ := lru.New(bodyCacheLimit)
 	bodyRLPCache, _ := lru.New(bodyCacheLimit)
 	receiptsCache, _ := lru.New(receiptsCacheLimit)
+	transferLogsCache, _ := lru.New(transferLogsCacheLimit)
 	blockCache, _ := lru.New(blockCacheLimit)
 	txLookupCache, _ := lru.New(txLookupCacheLimit)
 	badBlockCache, _ := lru.New(maxBadBlockLimit)
@@ -291,6 +295,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		bodyCache:             bodyCache,
 		bodyRLPCache:          bodyRLPCache,
 		receiptsCache:         receiptsCache,
+		transferLogsCache:     transferLogsCache,
 		blockCache:            blockCache,
 		badBlockCache:         badBlockCache,
 		diffLayerCache:        diffLayerCache,
@@ -748,6 +753,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, root common.Hash) (uint64, 
 			// removed in the hc.SetHead function.
 			rawdb.DeleteBody(db, hash, num)
 			rawdb.DeleteReceipts(db, hash, num)
+			rawdb.DeleteTransferLogs(db, hash, num)
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
@@ -767,6 +773,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, root common.Hash) (uint64, 
 	bc.bodyCache.Purge()
 	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
+	bc.transferLogsCache.Purge()
 	bc.blockCache.Purge()
 	bc.txLookupCache.Purge()
 	bc.futureBlocks.Purge()
@@ -1450,12 +1457,13 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 				if frozen, _ := bc.db.Ancients(); frozen == 0 {
 					h := rawdb.ReadCanonicalHash(bc.db, 0)
 					b := rawdb.ReadBlock(bc.db, h, 0)
-					size += rawdb.WriteAncientBlock(bc.db, b, rawdb.ReadReceipts(bc.db, h, 0, bc.chainConfig), rawdb.ReadTd(bc.db, h, 0))
+					l := rawdb.ReadTransferLogs(bc.db, h, frozen)
+					size += rawdb.WriteAncientBlock(bc.db, b, rawdb.ReadReceipts(bc.db, h, frozen, bc.chainConfig), rawdb.ReadTd(bc.db, h, frozen), l)
 					log.Info("Wrote genesis to ancients")
 				}
 			}
 			// Flush data into ancient database.
-			size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
+			size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()), nil)
 
 			// Write tx indices if any condition is satisfied:
 			// * If user requires to reserve all tx indices(txlookuplimit=0)
@@ -1555,6 +1563,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			// Write all the data out into the database
 			rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body())
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
+
+			// We don't have transfer logs for fast sync blocks
+			rawdb.WriteMissingTransferLogs(batch, block.Hash(), block.NumberU64())
 			rawdb.WriteTxLookupEntriesByBlock(batch, block) // Always write tx indices for live blocks, we assume they are needed
 
 			// Write everything belongs to the blocks into the database. So that
@@ -1707,6 +1718,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
 		rawdb.WriteBlock(blockBatch, block)
 		rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+		rawdb.WriteTransferLogs(blockBatch, block.Hash(), block.NumberU64(), state.TransferLogs())
 		rawdb.WritePreimages(blockBatch, state.Preimages())
 		if err := blockBatch.Write(); err != nil {
 			log.Crit("Failed to write block into disk", "err", err)
@@ -2209,7 +2221,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 
 		dirty, _ := bc.stateCache.TrieDB().Size()
 		stats.report(chain, it.index, dirty)
-		bc.WriteTransferLogs(block.Hash(), block.NumberU64(), statedb.TransferLogs())
 	}
 	// Any blocks remaining here? The only ones we care about are the future ones
 	if block != nil && errors.Is(err, consensus.ErrFutureBlock) {
@@ -3115,10 +3126,18 @@ func (bc *BlockChain) WriteTransferLogs(hash common.Hash, number uint64, transfe
 }
 
 // GetTransferLogs retrieves the transfer logs for all transactions in a given block.
-func (bc *BlockChain) GetTransferLogs(hash common.Hash) []*types.TransferLog {
+func (bc *BlockChain) GetTransferLogs(hash common.Hash) ([]*types.TransferLog, error) {
+	if transferLogs, ok := bc.transferLogsCache.Get(hash); ok {
+		return transferLogs.([]*types.TransferLog), nil
+	}
 	number := rawdb.ReadHeaderNumber(bc.db, hash)
 	if number == nil {
-		return nil
+		return nil, ethereum.NotFound
 	}
-	return rawdb.ReadTransferLogs(bc.db, hash, *number)
+	transferLogs, err := rawdb.ReadTransferLogs(bc.db, hash, *number)
+	if err != nil {
+		return nil, err
+	}
+	bc.transferLogsCache.Add(hash, transferLogs)
+	return transferLogs, nil
 }
