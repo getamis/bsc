@@ -19,6 +19,7 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math/big"
 	"sort"
 
@@ -29,6 +30,11 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
+)
+
+var (
+	errNotFound            = errors.New("not found")
+	errMissingTransferLogs = errors.New("missing transfer logs")
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -663,18 +669,21 @@ func ReadTransferLogsRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.R
 }
 
 // ReadTransferLogs retrieves all the transfer logs belonging to a block.
-func ReadTransferLogs(db ethdb.Reader, hash common.Hash, number uint64) []*types.TransferLog {
+func ReadTransferLogs(db ethdb.Reader, hash common.Hash, number uint64) ([]*types.TransferLog, error) {
 	// Retrieve the flattened transfer log slice
 	data := ReadTransferLogsRLP(db, hash, number)
 	if len(data) == 0 {
-		return nil
+		return nil, errNotFound
 	}
 	transferLogs := []*types.TransferLog{}
 	if err := rlp.DecodeBytes(data, &transferLogs); err != nil {
+		if string(data) == errMissingTransferLogs.Error() {
+			return nil, errMissingTransferLogs
+		}
 		log.Error("Invalid transfer log array RLP", "hash", hash, "number", number, "err", err)
-		return nil
+		return nil, err
 	}
-	return transferLogs
+	return transferLogs, nil
 }
 
 // WriteTransferLogs stores all the transfer logs belonging to a block.
@@ -691,7 +700,7 @@ func WriteTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64,
 
 // WriteMissingTransferLogs stores missing transfer logs message for a block.
 func WriteMissingTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	bytes := []byte("missing transfer logs")
+	bytes := []byte(errMissingTransferLogs.Error())
 	// Store the flattened transfer log slice
 	if err := db.Put(blockTransferLogsKey(number, hash), bytes); err != nil {
 		log.Crit("Failed to store block transfer logs", "hash", hash, "number", number, "err", err)
@@ -762,7 +771,7 @@ func WriteAncientBlock(db ethdb.AncientWriter, block *types.Block, receipts type
 			log.Crit("Failed to RLP encode block transfer logs", "err", err)
 		}
 	} else {
-		transferLogBlob = []byte("missing transfer logs")
+		transferLogBlob = []byte(errMissingTransferLogs.Error())
 	}
 	// Write all blob to flatten files.
 	err = db.AppendAncient(block.NumberU64(), block.Hash().Bytes(), headerBlob, bodyBlob, receiptBlob, tdBlob, transferLogBlob)
