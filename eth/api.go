@@ -394,10 +394,7 @@ func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, sta
 
 // GetTransferLogs is a debug API function that returns the transfer logs for a block hash, if known.
 func (api *PrivateDebugAPI) GetTransferLogs(ctx context.Context, hash common.Hash) ([]*types.TransferLog, error) {
-	if transferLogs := api.eth.blockchain.GetTransferLogs(hash); transferLogs != nil {
-		return transferLogs, nil
-	}
-	return nil, errors.New("unknown transfer logs")
+	return api.eth.blockchain.GetTransferLogs(hash)
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
