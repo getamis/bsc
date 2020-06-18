@@ -1457,7 +1457,10 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 				if frozen, _ := bc.db.Ancients(); frozen == 0 {
 					h := rawdb.ReadCanonicalHash(bc.db, 0)
 					b := rawdb.ReadBlock(bc.db, h, 0)
-					l := rawdb.ReadTransferLogs(bc.db, h, frozen)
+					l, err := rawdb.ReadTransferLogs(bc.db, h, frozen)
+					if err != nil {
+						return i, err
+					}
 					size += rawdb.WriteAncientBlock(bc.db, b, rawdb.ReadReceipts(bc.db, h, frozen, bc.chainConfig), rawdb.ReadTd(bc.db, h, frozen), l)
 					log.Info("Wrote genesis to ancients")
 				}
