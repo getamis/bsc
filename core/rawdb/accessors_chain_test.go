@@ -513,7 +513,7 @@ func TestAncientTransferLogStorageTransferLog(t *testing.T) {
 	}
 	defer os.Remove(frdir)
 
-	db, err := NewDatabaseWithFreezer(NewMemoryDatabase(), frdir, "")
+	db, err := NewDatabaseWithFreezer(NewMemoryDatabase(), frdir, "", false)
 	if err != nil {
 		t.Fatalf("failed to create database with ancient backend")
 	}
