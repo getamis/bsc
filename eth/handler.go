@@ -463,6 +463,7 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 		// Send the block to a subset of our peers
 		var transfer []*ethPeer
 		if h.directBroadcast {
+			//nolint:unconvert
 			transfer = peers[:int(len(peers))]
 		} else {
 			transfer = peers[:int(math.Sqrt(float64(len(peers))))]

@@ -1048,6 +1048,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 }
 
 // copyReceipts makes a deep copy of the given receipts.
+//nolint:deadcode
 func copyReceipts(receipts []*types.Receipt) []*types.Receipt {
 	result := make([]*types.Receipt, len(receipts))
 	for i, l := range receipts {

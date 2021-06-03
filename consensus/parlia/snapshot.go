@@ -250,6 +250,7 @@ func (s *Snapshot) enoughDistance(validator common.Address) bool {
 		return true
 	}
 	validatorNum := int64(len(s.validators()))
+	//nolint:unconvert
 	offset := (int64(s.Number) + 1) % int64(validatorNum)
 	if int64(idx) >= offset {
 		return int64(idx)-offset >= validatorNum/2

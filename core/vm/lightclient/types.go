@@ -102,7 +102,7 @@ func (cs ConsensusState) EncodeConsensusState() ([]byte, error) {
 	}
 	copy(encodingBytes[pos:pos+chainIDLength], cs.ChainID)
 	pos += chainIDLength
-
+	//nolint:unconvert
 	binary.BigEndian.PutUint64(encodingBytes[pos:pos+heightLength], uint64(cs.Height))
 	pos += heightLength
 

@@ -138,7 +138,7 @@ func main() {
 	if len(bep2eNumAmounts) != len(symbols) || len(symbols) != len(contracts) {
 		log.Crit("Length of bep2eContracts, bep2eSymbols, bep2eAmounts mismatch")
 	}
-
+	//nolint:gosimple
 	bep2eInfos := make(map[string]bep2eInfo, 0)
 	for idx, s := range symbols {
 		n, ok := big.NewInt(0).SetString(bep2eNumAmounts[idx], 10)
