@@ -634,14 +634,24 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		optional bool // if true, the fork may be nil and next fork is still allowed
 	}
 	var lastFork fork
+	bscFork := false
 	for _, cur := range []fork{
 		{name: "mirrorSyncBlock", block: c.MirrorSyncBlock},
 		{name: "brunoBlock", block: c.BrunoBlock},
 		{name: "berlinBlock", block: c.BerlinBlock},
 	} {
 		if lastFork.name != "" {
+			if lastFork.name == "ramanujanBlock" || lastFork.name == "mirrorSyncBlock" {
+				if lastFork.block != nil {
+					bscFork = true
+				}
+			}
 			// Next one must be higher number
 			if lastFork.block == nil && cur.block != nil {
+				// To pass through AllEthashProtocolChanges
+				if !bscFork && cur.name == "berlinBlock" {
+					return nil
+				}
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
 					lastFork.name, cur.name, cur.block)
 			}
