@@ -1815,6 +1815,12 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceiptsByBlockNumber(ctx conte
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNumber)
 	}
+
+	return ToTxReceipts(blockNumber, blockHash, receipts, block)
+}
+
+func ToTxReceipts(blockNumber uint64, blockHash common.Hash, receipts types.Receipts, block *types.Block) ([]map[string]interface{}, error) {
+
 	txs := block.Transactions()
 	if len(txs) != len(receipts) {
 		return nil, fmt.Errorf("txs length doesn't equal to receipts' length")
