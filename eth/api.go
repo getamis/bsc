@@ -543,9 +543,16 @@ func (api *PrivateDebugAPI) getModifiedAccounts(startBlock, endBlock *types.Bloc
 }
 
 // GetBlockReceipts returns all transaction receipts of the specified block.
-func (api *PrivateDebugAPI) GetBlockReceipts(blockHash common.Hash) (types.Receipts, error) {
+func (api *PrivateDebugAPI) GetBlockReceipts(blockHash common.Hash) ([]map[string]interface{}, error) {
+	blockNumber := rawdb.ReadHeaderNumber(api.eth.ChainDb(), blockHash)
 	if receipts := api.eth.blockchain.GetReceiptsByHash(blockHash); receipts != nil {
-		return receipts, nil
+		if block := api.eth.blockchain.GetBlockByHash(blockHash); block != nil {
+			if blockNumber != nil {
+				return ethapi.ToTxReceipts(*blockNumber, blockHash, receipts, block)
+			} else {
+				return ethapi.ToTxReceipts(0, blockHash, receipts, block)
+			}
+		}
 	}
 	return nil, errors.New("unknown receipts")
 }
