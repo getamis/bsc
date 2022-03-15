@@ -34,16 +34,10 @@ import (
 )
 
 var (
-	baseDir                        = filepath.Join(".", "testdata")
-	blockTestDir                   = filepath.Join(baseDir, "BlockchainTests")
-	stateTestDir                   = filepath.Join(baseDir, "GeneralStateTests")
-	legacyStateTestDir             = filepath.Join(baseDir, "LegacyTests", "Constantinople", "GeneralStateTests")
-	transactionTestDir             = filepath.Join(baseDir, "TransactionTests")
-	rlpTestDir                     = filepath.Join(baseDir, "RLPTests")
-	difficultyTestDir              = filepath.Join(baseDir, "BasicTests")
-	executionSpecBlockchainTestDir = filepath.Join(".", "spec-tests", "fixtures", "blockchain_tests")
-	executionSpecStateTestDir      = filepath.Join(".", "spec-tests", "fixtures", "state_tests")
-	benchmarksDir                  = filepath.Join(".", "evm-benchmarks", "benchmarks")
+	baseDir            = filepath.Join(".", "testdata")
+	transactionTestDir = filepath.Join(baseDir, "TransactionTests")
+	rlpTestDir         = filepath.Join(baseDir, "RLPTests")
+	difficultyTestDir  = filepath.Join(baseDir, "BasicTests")
 )
 
 func readJSON(reader io.Reader, value interface{}) error {
@@ -109,9 +103,9 @@ type testFailure struct {
 }
 
 // skipShortMode skips tests matching when the -short flag is used.
-func (tm *testMatcher) slow(pattern string) {
-	tm.slowpat = append(tm.slowpat, regexp.MustCompile(pattern))
-}
+// func (tm *testMatcher) slow(pattern string) {
+// 	tm.slowpat = append(tm.slowpat, regexp.MustCompile(pattern))
+// }
 
 // skipLoad skips JSON loading of tests matching the pattern.
 func (tm *testMatcher) skipLoad(pattern string) {
