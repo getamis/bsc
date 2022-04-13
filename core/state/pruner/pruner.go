@@ -335,8 +335,12 @@ func (p *BlockPruner) backUpOldDb(name string, cache, handles int, namespace str
 		if td == nil {
 			return consensus.ErrUnknownAncestor
 		}
+		l, err := rawdb.ReadTransferLogs(chainDb, blockHash, blockNumber)
+		if err != nil {
+			return err
+		}
 		// Write into new ancient_back db.
-		rawdb.WriteAncientBlock(frdbBack, block, receipts, td)
+		rawdb.WriteAncientBlock(frdbBack, block, receipts, td, l)
 		// Print the log every 5s for better trace.
 		if common.PrettyDuration(time.Since(start)) > common.PrettyDuration(5*time.Second) {
 			log.Info("block backup process running successfully", "current blockNumber for backup", blockNumber)
