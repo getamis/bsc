@@ -1714,20 +1714,15 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//
 	// Note all the components of block(td, hash->number map, header, body, receipts)
 	// should be written atomically. BlockBatch is used for containing all components.
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		blockBatch := bc.db.NewBatch()
-		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
-		rawdb.WriteBlock(blockBatch, block)
-		rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
-		rawdb.WriteTransferLogs(blockBatch, block.Hash(), block.NumberU64(), state.TransferLogs())
-		rawdb.WritePreimages(blockBatch, state.Preimages())
-		if err := blockBatch.Write(); err != nil {
-			log.Crit("Failed to write block into disk", "err", err)
-		}
-		wg.Done()
-	}()
+	blockBatch := bc.db.NewBatch()
+	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+	rawdb.WriteBlock(blockBatch, block)
+	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+	rawdb.WriteTransferLogs(blockBatch, block.Hash(), block.NumberU64(), state.TransferLogs())
+	rawdb.WritePreimages(blockBatch, state.Preimages())
+	if err := blockBatch.Write(); err != nil {
+		log.Crit("Failed to write block into disk", "err", err)
+	}
 
 	tryCommitTrieDB := func() error {
 		bc.commitLock.Lock()
@@ -1812,8 +1807,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		diffLayer.Number = block.NumberU64()
 		bc.cacheDiffLayer(diffLayer)
 	}
-
-	wg.Wait()
 
 	// If the total difficulty is higher than our known, add it to the canonical chain
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
