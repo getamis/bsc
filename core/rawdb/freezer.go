@@ -248,7 +248,7 @@ func (f *freezer) AppendAncient(number uint64, hash, header, body, receipts, td,
 		log.Error("Failed to append ancient difficulty", "number", f.frozen, "hash", hash, "err", err)
 		return err
 	}
-	if err := f.tables[freezerTransferLogTable].Append(f.frozen, transferLogs); err != nil {
+	if err := f.tables[freezerTransferLogTable].Append(f.frozen-f.offset, transferLogs); err != nil {
 		log.Error("Failed to append ancient transfer logs", "number", f.frozen, "hash", hash, "err", err)
 		return err
 	}
