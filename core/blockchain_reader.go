@@ -20,6 +20,7 @@ import (
 	"errors"
 	"math/big"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -510,4 +511,17 @@ func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscr
 // SubscribeFinalizedHeaderEvent registers a subscription of FinalizedHeaderEvent.
 func (bc *BlockChain) SubscribeFinalizedHeaderEvent(ch chan<- FinalizedHeaderEvent) event.Subscription {
 	return bc.scope.Track(bc.finalizedHeaderFeed.Subscribe(ch))
+}
+
+func (bc *BlockChain) GetTransferLogs(hash common.Hash) ([]*types.TransferLog, error) {
+	number := rawdb.ReadHeaderNumber(bc.db, hash)
+	if number == nil {
+		return nil, ethereum.NotFound
+	}
+	transferLogs, err := rawdb.ReadTransferLogs(bc.db, hash, *number)
+	if err != nil {
+		return nil, err
+	}
+	bc.transferLogsCache.Add(hash, transferLogs)
+	return transferLogs, nil
 }
