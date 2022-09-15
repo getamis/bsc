@@ -123,6 +123,8 @@ const (
 	maxBeyondBlocks     = 2048
 	prefetchTxNumber    = 100
 
+	transferLogsCacheLimit = 32
+
 	diffLayerFreezerRecheckInterval = 3 * time.Second
 	maxDiffForkDist                 = 11 // Maximum allowed backward distance from the chain head
 
@@ -318,6 +320,8 @@ type BlockChain struct {
 	// future blocks are blocks added for later processing
 	futureBlocks *lru.Cache[common.Hash, *types.Block]
 
+	transferLogsCache *lru.Cache[common.Hash, []*types.TransferLog]
+
 	// trusted diff layers
 	diffLayerCache             *exlru.Cache                          // Cache for the diffLayers
 	diffLayerChanCache         *exlru.Cache                          // Cache for the difflayer channel
@@ -411,6 +415,8 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 		logger:             vmConfig.Tracer,
+
+		transferLogsCache: lru.NewCache[common.Hash, []*types.TransferLog](transferLogsCacheLimit),
 	}
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
@@ -1133,6 +1139,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 			rawdb.DeleteBody(db, hash, num)
 			rawdb.DeleteBlobSidecars(db, hash, num)
 			rawdb.DeleteReceipts(db, hash, num)
+			rawdb.DeleteTransferLogs(db, hash, num)
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
@@ -1158,6 +1165,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
 	bc.sidecarsCache.Purge()
+	bc.transferLogsCache.Purge()
 	bc.blockCache.Purge()
 	bc.blockStatsCache.Purge()
 	bc.txLookupCache.Purge()
@@ -1573,7 +1581,11 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		if first.NumberU64() == 1 {
 			if frozen, _ := bc.db.BlockStore().Ancients(); frozen == 0 {
 				td := bc.genesisBlock.Difficulty()
-				writeSize, err := rawdb.WriteAncientBlocks(bc.db.BlockStore(), []*types.Block{bc.genesisBlock}, []types.Receipts{nil}, td)
+				tfLogs, err := rawdb.ReadTransferLogs(bc.db, bc.genesisBlock.Hash(), frozen)
+				if err != nil {
+					return 0, err
+				}
+				writeSize, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{bc.genesisBlock}, []types.Receipts{nil}, td, tfLogs)
 				if err != nil {
 					log.Error("Error writing genesis to ancients", "err", err)
 					return 0, err
@@ -1591,7 +1603,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 		// Write all chain data to ancients.
 		td := bc.GetTd(first.Hash(), first.NumberU64())
-		writeSize, err := rawdb.WriteAncientBlocksWithBlobs(bc.db.BlockStore(), blockChain, receiptChain, td)
+		writeSize, err := rawdb.WriteAncientBlocksWithBlobs(bc.db, blockChain, receiptChain, td, nil)
 		if err != nil {
 			log.Error("Error importing chain data to ancients", "err", err)
 			return 0, err
@@ -1673,6 +1685,8 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 				rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
 			}
+			// We don't have transfer logs for fast sync blocks
+			rawdb.WriteMissingTransferLogs(batch, block.Hash(), block.NumberU64())
 
 			// Write everything belongs to the blocks into the database. So that
 			// we can ensure all components of body is completed(body, receipts)
@@ -3363,13 +3377,4 @@ func (bc *BlockChain) WriteTransferLogs(hash common.Hash, number uint64, transfe
 	bc.wg.Add(1)
 	defer bc.wg.Done()
 	rawdb.WriteTransferLogs(bc.db, hash, number, transferLogs)
-}
-
-// GetTransferLogs retrieves the transfer logs for all transactions in a given block.
-func (bc *BlockChain) GetTransferLogs(hash common.Hash) []*types.TransferLog {
-	number := rawdb.ReadHeaderNumber(bc.db, hash)
-	if number == nil {
-		return nil
-	}
-	return rawdb.ReadTransferLogs(bc.db, hash, *number)
 }
