@@ -41,6 +41,9 @@ const (
 
 	// ChainFreezerBlobSidecarTable indicates the name of the freezer total blob table.
 	ChainFreezerBlobSidecarTable = "blobs"
+
+	// ChainFreezerTransferLogTable indicates the name of the freezer transfer logs table.
+	ChainFreezerTransferLogTable = "transfers"
 )
 
 // chainFreezerNoSnappy configures whether compression is disabled for the ancient-tables.
@@ -52,6 +55,7 @@ var chainFreezerNoSnappy = map[string]bool{
 	ChainFreezerReceiptTable:     false,
 	ChainFreezerDifficultyTable:  true,
 	ChainFreezerBlobSidecarTable: false,
+	ChainFreezerTransferLogTable: false,
 }
 
 var additionTables = []string{ChainFreezerBlobSidecarTable}
