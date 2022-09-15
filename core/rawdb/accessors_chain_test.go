@@ -546,9 +546,12 @@ func TestAncientStorage(t *testing.T) {
 	if blob := ReadTdRLP(db, hash, number); len(blob) > 0 {
 		t.Fatalf("non existent td returned")
 	}
+	if blob := ReadTransferLogsRLP(db, hash, number); len(blob) > 0 {
+		t.Fatalf("non existent transfer logs returned")
+	}
 
 	// Write and verify the header in the database
-	_, err = WriteAncientBlocks(db, []*types.Block{block}, []types.Receipts{nil}, big.NewInt(100))
+	_, err = WriteAncientBlocks(db, []*types.Block{block}, []types.Receipts{nil}, big.NewInt(100), nil)
 	require.NoError(t, err)
 
 	if blob := ReadHeaderRLP(db, hash, number); len(blob) == 0 {
@@ -562,6 +565,9 @@ func TestAncientStorage(t *testing.T) {
 	}
 	if blob := ReadTdRLP(db, hash, number); len(blob) == 0 {
 		t.Fatalf("no td returned")
+	}
+	if blob := ReadTransferLogsRLP(db, hash, number); len(blob) == 0 {
+		t.Fatalf("no transfer logs returned")
 	}
 
 	// Use a fake hash for data retrieval, nothing should be returned.
@@ -577,6 +583,55 @@ func TestAncientStorage(t *testing.T) {
 	}
 	if blob := ReadTdRLP(db, fakeHash, number); len(blob) != 0 {
 		t.Fatalf("invalid td returned")
+	}
+	if blob := ReadTransferLogsRLP(db, fakeHash, number); len(blob) != 0 {
+		t.Fatalf("invalid transfer logs returned")
+	}
+}
+
+func TestAncientTransferLogStorageTransferLog(t *testing.T) {
+	// Freezer style fast import the chain.
+	frdir, err := os.MkdirTemp("", "")
+	if err != nil {
+		t.Fatalf("failed to create temp freezer dir: %v", err)
+	}
+	defer os.Remove(frdir)
+
+	db, err := NewDatabaseWithFreezer(NewMemoryDatabase(), frdir, "", false, false, false, false)
+	if err != nil {
+		t.Fatalf("failed to create database with ancient backend")
+	}
+	defer db.Close()
+	// Create a test block
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:      big.NewInt(0),
+		Extra:       []byte("test block"),
+		UncleHash:   types.EmptyUncleHash,
+		TxHash:      types.EmptyRootHash,
+		ReceiptHash: types.EmptyRootHash,
+	})
+	hash, number := block.Hash(), block.NumberU64()
+	// missing transfer logs
+	WriteAncientBlocks(db, []*types.Block{block}, []types.Receipts{nil}, big.NewInt(100), nil)
+	tlogs, err := ReadTransferLogs(db, hash, number)
+	if tlogs != nil || err != errMissingTransferLogs {
+		t.Fatalf("should return nil transfer logs and missing transfer logs error")
+	}
+
+	// Create a test block
+	block2 := types.NewBlockWithHeader(&types.Header{
+		Number:      big.NewInt(1),
+		Extra:       []byte("test block"),
+		UncleHash:   types.EmptyUncleHash,
+		TxHash:      types.EmptyRootHash,
+		ReceiptHash: types.EmptyRootHash,
+	})
+	hash, number = block2.Hash(), block2.NumberU64()
+	// Write with nil transfer logs, should get nil transfer logs.
+	WriteAncientBlocks(db, []*types.Block{block2}, []types.Receipts{nil}, big.NewInt(101), []*types.TransferLog{})
+	tlogs, err = ReadTransferLogs(db, hash, number)
+	if tlogs == nil || err != nil {
+		t.Fatalf("invalid transfer logs returned")
 	}
 }
 
@@ -689,7 +744,7 @@ func BenchmarkWriteAncientBlocks(b *testing.B) {
 		for j := 0; j < length; j++ {
 			blocks[i+j] = blocks[i+j].WithSidecars(batchSidecars[j])
 		}
-		writeSize, err := WriteAncientBlocks(db, blocks, receipts, td)
+		writeSize, err := WriteAncientBlocks(db, blocks, receipts, td, nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1023,7 +1078,7 @@ func TestHeadersRLPStorage(t *testing.T) {
 	}
 	var receipts []types.Receipts = make([]types.Receipts, 100)
 	// Write first half to ancients
-	WriteAncientBlocks(db, chain[:50], receipts[:50], big.NewInt(100))
+	WriteAncientBlocks(db, chain[:50], receipts[:50], big.NewInt(100), nil)
 	// Write second half to db
 	for i := 50; i < 100; i++ {
 		WriteCanonicalHash(db, chain[i].Hash(), chain[i].NumberU64())
@@ -1077,12 +1132,12 @@ func TestTransferLogStorage(t *testing.T) {
 
 	// Check that no transfer logs entries are in a pristine database
 	hash := common.BytesToHash([]byte{0x03, 0x14})
-	if ls := ReadTransferLogs(db, hash, 0); len(ls) != 0 {
+	if ls, err := ReadTransferLogs(db, hash, 0); len(ls) != 0 || err != errNotFound {
 		t.Fatalf("non existent transfer logs returned: %v", ls)
 	}
 	// Insert the transfer log slice into the database and check presence
 	WriteTransferLogs(db, hash, 0, transferLogs)
-	if ls := ReadTransferLogs(db, hash, 0); len(ls) == 0 {
+	if ls, err := ReadTransferLogs(db, hash, 0); len(ls) == 0 || err != nil {
 		t.Fatalf("no transfer logs returned")
 	} else {
 		for i := 0; i < len(transferLogs); i++ {
@@ -1096,7 +1151,13 @@ func TestTransferLogStorage(t *testing.T) {
 	}
 	// Delete the transfer log slice and check purge
 	DeleteTransferLogs(db, hash, 0)
-	if ls := ReadTransferLogs(db, hash, 0); len(ls) != 0 {
+	if ls, err := ReadTransferLogs(db, hash, 0); len(ls) != 0 || err != errNotFound {
 		t.Fatalf("deleted transfer logs returned: %v", ls)
+	}
+	// Insert missing transfer logs into the database and check error
+	hash2 := common.BytesToHash([]byte{0x07, 0x15})
+	WriteMissingTransferLogs(db, hash2, 1)
+	if ls, err := ReadTransferLogs(db, hash2, 1); len(ls) != 0 || err != errMissingTransferLogs {
+		t.Fatalf("no transfer logs returned and should return missing transfer logs error")
 	}
 }
