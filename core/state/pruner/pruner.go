@@ -448,6 +448,10 @@ func (p *BlockPruner) backUpOldDb(name string, cache, handles int, namespace str
 		blockHash := rawdb.ReadCanonicalHash(chainDb, blockNumber)
 		block := rawdb.ReadBlock(chainDb, blockHash, blockNumber)
 		receipts := rawdb.ReadRawReceipts(chainDb, blockHash, blockNumber)
+		transferLogs, err := rawdb.ReadTransferLogs(chainDb, blockHash, blockNumber)
+		if err != nil {
+			return err
+		}
 		// Calculate the total difficulty of the block
 		td := rawdb.ReadTd(chainDb, blockHash, blockNumber)
 		if td == nil {
@@ -457,7 +461,7 @@ func (p *BlockPruner) backUpOldDb(name string, cache, handles int, namespace str
 		blobs := rawdb.ReadBlobSidecars(chainDb, blockHash, blockNumber)
 		block = block.WithSidecars(blobs)
 		// Write into new ancient_back db.
-		if _, err := rawdb.WriteAncientBlocksWithBlobs(frdbBack, []*types.Block{block}, []types.Receipts{receipts}, td); err != nil {
+		if _, err := rawdb.WriteAncientBlocksWithBlobs(frdbBack, []*types.Block{block}, []types.Receipts{receipts}, td, transferLogs); err != nil {
 			log.Error("failed to write new ancient", "error", err)
 			return err
 		}
