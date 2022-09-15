@@ -443,6 +443,10 @@ func (f *chainFreezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hash
 					return fmt.Errorf("block blobs missing, can't freeze block %d", number)
 				}
 			}
+			transferLogs := ReadTransferLogsRLP(nfdb, hash, number)
+			if len(transferLogs) == 0 {
+				return fmt.Errorf("transfer logs missing, can't freeze block %d", number)
+			}
 
 			// Write to the batch.
 			if err := op.AppendRaw(ChainFreezerHashTable, number, hash[:]); err != nil {
@@ -464,6 +468,9 @@ func (f *chainFreezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hash
 				if err := op.AppendRaw(ChainFreezerBlobSidecarTable, number, sidecars); err != nil {
 					return fmt.Errorf("can't write blobs to Freezer: %v", err)
 				}
+			}
+			if err := op.AppendRaw(ChainFreezerTransferLogTable, number, transferLogs); err != nil {
+				return fmt.Errorf("can't write transfer logs to Freezer: %v", err)
 			}
 
 			hashes = append(hashes, hash)
