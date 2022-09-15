@@ -110,6 +110,8 @@ const (
 	maxBeyondBlocks     = 2048
 	prefetchTxNumber    = 100
 
+	transferLogsCacheLimit = 32
+
 	diffLayerFreezerRecheckInterval = 3 * time.Second
 	maxDiffForkDist                 = 11 // Maximum allowed backward distance from the chain head
 
@@ -273,6 +275,8 @@ type BlockChain struct {
 	// Cache for the blocks that failed to pass MPT root verification
 	badBlockCache *lru.Cache[common.Hash, time.Time]
 
+	transferLogsCache *lru.Cache[common.Hash, []*types.TransferLog]
+
 	// trusted diff layers
 	diffLayerCache             *exlru.Cache                          // Cache for the diffLayers
 	diffLayerChanCache         *exlru.Cache                          // Cache for the difflayer channel
@@ -357,6 +361,8 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		vmConfig:           vmConfig,
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
+
+		transferLogsCache: lru.NewCache[common.Hash, []*types.TransferLog](transferLogsCacheLimit),
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
@@ -947,6 +953,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 			// removed in the hc.SetHead function.
 			rawdb.DeleteBody(db, hash, num)
 			rawdb.DeleteReceipts(db, hash, num)
+			rawdb.DeleteTransferLogs(db, hash, num)
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
@@ -971,6 +978,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.bodyCache.Purge()
 	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
+	bc.transferLogsCache.Purge()
 	bc.blockCache.Purge()
 	bc.txLookupCache.Purge()
 	bc.futureBlocks.Purge()
@@ -1339,7 +1347,11 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			if frozen, _ := bc.db.Ancients(); frozen == 0 {
 				b := bc.genesisBlock
 				td := bc.genesisBlock.Difficulty()
-				writeSize, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{b}, []types.Receipts{nil}, td)
+				tfLogs, err := rawdb.ReadTransferLogs(bc.db, b.Hash(), frozen)
+				if err != nil {
+					return 0, err
+				}
+				writeSize, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{b}, []types.Receipts{nil}, td, tfLogs)
 				size += writeSize
 				if err != nil {
 					log.Error("Error writing genesis to ancients", "err", err)
@@ -1357,7 +1369,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 		// Write all chain data to ancients.
 		td := bc.GetTd(first.Hash(), first.NumberU64())
-		writeSize, err := rawdb.WriteAncientBlocks(bc.db, blockChain, receiptChain, td)
+		writeSize, err := rawdb.WriteAncientBlocks(bc.db, blockChain, receiptChain, td, nil)
 		size += writeSize
 		if err != nil {
 			log.Error("Error importing chain data to ancients", "err", err)
@@ -1464,6 +1476,8 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body())
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
 			rawdb.WriteTxLookupEntriesByBlock(batch, block) // Always write tx indices for live blocks, we assume they are needed
+			// We don't have transfer logs for fast sync blocks
+			rawdb.WriteMissingTransferLogs(batch, block.Hash(), block.NumberU64())
 
 			// Write everything belongs to the blocks into the database. So that
 			// we can ensure all components of body is completed(body, receipts,
@@ -3114,13 +3128,4 @@ func (bc *BlockChain) WriteTransferLogs(hash common.Hash, number uint64, transfe
 	bc.wg.Add(1)
 	defer bc.wg.Done()
 	rawdb.WriteTransferLogs(bc.db, hash, number, transferLogs)
-}
-
-// GetTransferLogs retrieves the transfer logs for all transactions in a given block.
-func (bc *BlockChain) GetTransferLogs(hash common.Hash) []*types.TransferLog {
-	number := rawdb.ReadHeaderNumber(bc.db, hash)
-	if number == nil {
-		return nil
-	}
-	return rawdb.ReadTransferLogs(bc.db, hash, *number)
 }
