@@ -19,6 +19,7 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -31,6 +32,11 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
+)
+
+var (
+	errNotFound            = errors.New("not found")
+	errMissingTransferLogs = errors.New("missing transfer logs")
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -774,38 +780,80 @@ func ReadLogs(db ethdb.Reader, hash common.Hash, number uint64) [][]*types.Log {
 	return logs
 }
 
+// ReadTransferLogsRLP retrieves all the transfer logs belonging to a block in RLP encoding.
+func ReadTransferLogsRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue {
+	// First try to look up the data in ancient database. Extra hash
+	// comparison is necessary since ancient database only maintains
+	// the canonical data.
+	data, _ := db.Ancient(ChainFreezerTransferLogTable, number)
+	if len(data) > 0 {
+		h, _ := db.Ancient(ChainFreezerHashTable, number)
+		if common.BytesToHash(h) == hash {
+			return data
+		}
+	}
+	// Then try to look up the data in leveldb.
+	data, _ = db.Get(blockTransferLogsKey(number, hash))
+	if len(data) > 0 {
+		return data
+	}
+	// In the background freezer is moving data from leveldb to flatten files.
+	// So during the first check for ancient db, the data is not yet in there,
+	// but when we reach into leveldb, the data was already moved. That would
+	// result in a not found error.
+	data, _ = db.Ancient(ChainFreezerTransferLogTable, number)
+	if len(data) > 0 {
+		h, _ := db.Ancient(ChainFreezerHashTable, number)
+		if common.BytesToHash(h) == hash {
+			return data
+		}
+	}
+	return nil // Can't find the data anywhere.
+}
+
 // ReadTransferLogs retrieves all the transfer logs belonging to a block.
-func ReadTransferLogs(db ethdb.KeyValueReader, hash common.Hash, number uint64) []*types.TransferLog {
+func ReadTransferLogs(db ethdb.Reader, hash common.Hash, number uint64) ([]*types.TransferLog, error) {
 	// Retrieve the flattened transfer log slice
-	data, _ := db.Get(append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...))
+	data := ReadTransferLogsRLP(db, hash, number)
 	if len(data) == 0 {
-		return nil
+		return nil, errNotFound
 	}
 	transferLogs := []*types.TransferLog{}
 	if err := rlp.DecodeBytes(data, &transferLogs); err != nil {
-		log.Error("Invalid transfer log array RLP", "hash", hash, "err", err)
-		return nil
+		if string(data) == errMissingTransferLogs.Error() {
+			return nil, errMissingTransferLogs
+		}
+		log.Error("Invalid transfer log array RLP", "hash", hash, "number", number, "err", err)
+		return nil, err
 	}
-	return transferLogs
+	return transferLogs, nil
 }
 
 // WriteTransferLogs stores all the transfer logs belonging to a block.
 func WriteTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64, transferLogs []*types.TransferLog) {
 	bytes, err := rlp.EncodeToBytes(transferLogs)
 	if err != nil {
-		log.Crit("Failed to encode block transfer logs", "err", err)
+		log.Crit("Failed to encode block transfer logs", "hash", hash, "number", number, "err", err)
 	}
 	// Store the flattened transfer log slice
-	key := append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
-	if err := db.Put(key, bytes); err != nil {
-		log.Crit("Failed to store block transfer logs", "err", err)
+	if err := db.Put(blockTransferLogsKey(number, hash), bytes); err != nil {
+		log.Crit("Failed to store block transfer logs", "hash", hash, "number", number, "err", err)
+	}
+}
+
+// WriteMissingTransferLogs stores missing transfer logs message for a block.
+func WriteMissingTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
+	bytes := []byte(errMissingTransferLogs.Error())
+	// Store the flattened transfer log slice
+	if err := db.Put(blockTransferLogsKey(number, hash), bytes); err != nil {
+		log.Crit("Failed to store block transfer logs", "hash", hash, "number", number, "err", err)
 	}
 }
 
 // DeleteTransferLogs removes all transfer logs associated with a block hash.
 func DeleteTransferLogs(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	if err := db.Delete(append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)); err != nil {
-		log.Crit("Failed to delete block transfer logs", "err", err)
+	if err := db.Delete(blockTransferLogsKey(number, hash)); err != nil {
+		log.Crit("Failed to delete block transfer logs", "hash", hash, "number", number, "err", err)
 	}
 }
 
@@ -834,7 +882,7 @@ func WriteBlock(db ethdb.KeyValueWriter, block *types.Block) {
 }
 
 // WriteAncientBlocksWithBlobs writes entire block data with blobs into ancient store and returns the total written size.
-func WriteAncientBlocksWithBlobs(db ethdb.AncientWriter, blocks []*types.Block, receipts []rlp.RawValue, td *big.Int) (int64, error) {
+func WriteAncientBlocksWithBlobs(db ethdb.AncientWriter, blocks []*types.Block, receipts []rlp.RawValue, td *big.Int, transferLogs []*types.TransferLog) (int64, error) {
 	// find cancun index, it's used for new added blob ancient table
 	cancunIndex := -1
 	for i, block := range blocks {
@@ -851,7 +899,7 @@ func WriteAncientBlocksWithBlobs(db ethdb.AncientWriter, blocks []*types.Block, 
 		err     error
 	)
 	if cancunIndex > 0 {
-		preSize, err = WriteAncientBlocks(db, blocks[:cancunIndex], receipts[:cancunIndex], td)
+		preSize, err = WriteAncientBlocks(db, blocks[:cancunIndex], receipts[:cancunIndex], td, transferLogs)
 		if err != nil {
 			return preSize, err
 		}
@@ -871,12 +919,12 @@ func WriteAncientBlocksWithBlobs(db ethdb.AncientWriter, blocks []*types.Block, 
 		blocks = blocks[cancunIndex:]
 		receipts = receipts[cancunIndex:]
 	}
-	postSize, err := WriteAncientBlocks(db, blocks, receipts, tdSum)
+	postSize, err := WriteAncientBlocks(db, blocks, receipts, tdSum, transferLogs)
 	return preSize + postSize, err
 }
 
 // WriteAncientBlocks writes entire block data into ancient store and returns the total written size.
-func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts []rlp.RawValue, td *big.Int) (int64, error) {
+func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts []rlp.RawValue, td *big.Int, transferLogs []*types.TransferLog) (int64, error) {
 	var tdSum = new(big.Int).Set(td)
 
 	return db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
@@ -885,7 +933,7 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 			if i > 0 {
 				tdSum.Add(tdSum, header.Difficulty)
 			}
-			if err := writeAncientBlock(op, block, header, receipts[i], tdSum); err != nil {
+			if err := writeAncientBlock(op, block, header, receipts[i], tdSum, transferLogs); err != nil {
 				return err
 			}
 		}
@@ -893,7 +941,7 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 	})
 }
 
-func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *types.Header, receipts rlp.RawValue, td *big.Int) error {
+func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *types.Header, receipts rlp.RawValue, td *big.Int, transferLogs []*types.TransferLog) error {
 	num := block.NumberU64()
 	if err := op.AppendRaw(ChainFreezerHashTable, num, block.Hash().Bytes()); err != nil {
 		return fmt.Errorf("can't add block %d hash: %v", num, err)
@@ -914,6 +962,21 @@ func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *type
 		if err := op.Append(ChainFreezerBlobSidecarTable, num, block.Sidecars()); err != nil {
 			return fmt.Errorf("can't append block %d blobs: %v", num, err)
 		}
+	}
+	// Transfer logs might be nil when fast sync.
+	// To keep complete ancient table, we append the specific string to indicate nil transfer logs.
+	var transferLogBlob []byte
+	if transferLogs != nil {
+		var err error
+		transferLogBlob, err = rlp.EncodeToBytes(transferLogs)
+		if err != nil {
+			log.Crit("Failed to RLP encode block transfer logs", "err", err)
+		}
+	} else {
+		transferLogBlob = []byte(errMissingTransferLogs.Error())
+	}
+	if err := op.AppendRaw(ChainFreezerTransferLogTable, num, transferLogBlob); err != nil {
+		return fmt.Errorf("can't append block %d transfer logs: %v", num, err)
 	}
 	return nil
 }
@@ -998,6 +1061,9 @@ func WriteAncientHeaderChain(db ethdb.AncientWriter, headers []*types.Header, pt
 			// if err := op.Append(ChainFreezerBlobSidecarTable, num, nil); err != nil {
 			// 	return fmt.Errorf("can't append block %d receipts: %v", num, err)
 			// }
+			if err := op.AppendRaw(ChainFreezerTransferLogTable, num, []byte(errMissingTransferLogs.Error())); err != nil {
+				return fmt.Errorf("can't append block %d transfer logs: %v", num, err)
+			}
 		}
 		return nil
 	})

@@ -41,6 +41,9 @@ const (
 
 	// ChainFreezerBlobSidecarTable indicates the name of the freezer total blob table.
 	ChainFreezerBlobSidecarTable = "blobs"
+
+	// ChainFreezerTransferLogTable indicates the name of the freezer transfer logs table.
+	ChainFreezerTransferLogTable = "transfers"
 )
 
 // chainFreezerTableConfigs configures the settings for tables in the chain freezer.
@@ -52,6 +55,7 @@ var chainFreezerTableConfigs = map[string]freezerTableConfig{
 	ChainFreezerReceiptTable:     {noSnappy: false, prunable: true},
 	ChainFreezerDifficultyTable:  {noSnappy: true, prunable: true},
 	ChainFreezerBlobSidecarTable: {noSnappy: false, prunable: true},
+	ChainFreezerTransferLogTable: {noSnappy: false, prunable: true},
 }
 var additionTables = []string{ChainFreezerBlobSidecarTable}
 
