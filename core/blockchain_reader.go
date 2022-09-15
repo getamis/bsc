@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
@@ -658,4 +659,17 @@ func (bc *BlockChain) AncientTail() (uint64, error) {
 		return 0, err
 	}
 	return tail, nil
+}
+
+func (bc *BlockChain) GetTransferLogs(hash common.Hash) ([]*types.TransferLog, error) {
+	number := rawdb.ReadHeaderNumber(bc.db, hash)
+	if number == nil {
+		return nil, ethereum.NotFound
+	}
+	transferLogs, err := rawdb.ReadTransferLogs(bc.db, hash, *number)
+	if err != nil {
+		return nil, err
+	}
+	bc.transferLogsCache.Add(hash, transferLogs)
+	return transferLogs, nil
 }

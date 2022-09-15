@@ -221,6 +221,11 @@ func blockBALKey(number uint64, hash common.Hash) []byte {
 	return append(append(BlockBALPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
 }
 
+// blockTransferLogsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
+func blockTransferLogsKey(number uint64, hash common.Hash) []byte {
+	return append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
+}
+
 // txLookupKey = txLookupPrefix + hash
 func txLookupKey(hash common.Hash) []byte {
 	return append(txLookupPrefix, hash.Bytes()...)
