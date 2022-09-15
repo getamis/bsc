@@ -147,7 +147,7 @@ type StateDB struct {
 	AccountDeleted int
 	StorageDeleted int
 
-	// transferLogs records trasfer logs for each transaction.
+	// transferLogs records transfer logs for each transaction.
 	transferLogs map[common.Hash][]*types.TransferLog
 }
 
