@@ -102,11 +102,12 @@ var (
 	blockBodyPrefix     = []byte("b") // blockBodyPrefix + num (uint64 big endian) + hash -> block body
 	blockReceiptsPrefix = []byte("r") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
-	txLookupPrefix        = []byte("l") // txLookupPrefix + hash -> transaction/receipt lookup metadata
-	bloomBitsPrefix       = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
-	SnapshotAccountPrefix = []byte("a") // SnapshotAccountPrefix + account hash -> account trie value
-	SnapshotStoragePrefix = []byte("o") // SnapshotStoragePrefix + account hash + storage hash -> storage trie value
-	CodePrefix            = []byte("c") // CodePrefix + code hash -> account code
+	txLookupPrefix         = []byte("l") // txLookupPrefix + hash -> transaction/receipt lookup metadata
+	bloomBitsPrefix        = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	SnapshotAccountPrefix  = []byte("a") // SnapshotAccountPrefix + account hash -> account trie value
+	SnapshotStoragePrefix  = []byte("o") // SnapshotStoragePrefix + account hash + storage hash -> storage trie value
+	CodePrefix             = []byte("c") // codePrefix + code hash -> account code
+	blockTranferLogsPrefix = []byte("f") // blockTranferLogsPrefix + num (uint64 big endian) + hash -> block transfer logs
 
 	// difflayer database
 	diffLayerPrefix = []byte("d") // diffLayerPrefix + hash  -> diffLayer
@@ -136,16 +137,20 @@ const (
 
 	// freezerDifficultyTable indicates the name of the freezer total difficulty table.
 	freezerDifficultyTable = "diffs"
+
+	// freezerTransferLogTable indicates the name of the freezer transfer logs table.
+	freezerTransferLogTable = "transfers"
 )
 
 // FreezerNoSnappy configures whether compression is disabled for the ancient-tables.
 // Hashes and difficulties don't compress well.
 var FreezerNoSnappy = map[string]bool{
-	freezerHeaderTable:     false,
-	freezerHashTable:       true,
-	freezerBodiesTable:     false,
-	freezerReceiptTable:    false,
-	freezerDifficultyTable: true,
+	freezerHeaderTable:      false,
+	freezerHashTable:        true,
+	freezerBodiesTable:      false,
+	freezerReceiptTable:     false,
+	freezerDifficultyTable:  true,
+	freezerTransferLogTable: false,
 }
 
 // LegacyTxLookupEntry is the legacy TxLookupEntry definition with some unnecessary
@@ -201,6 +206,11 @@ func blockReceiptsKey(number uint64, hash common.Hash) []byte {
 // diffLayerKey = diffLayerKeyPrefix + hash
 func diffLayerKey(hash common.Hash) []byte {
 	return append(append(diffLayerPrefix, hash.Bytes()...))
+}
+
+// blockTransferLogsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
+func blockTransferLogsKey(number uint64, hash common.Hash) []byte {
+	return append(append(blockTranferLogsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
 }
 
 // txLookupKey = txLookupPrefix + hash

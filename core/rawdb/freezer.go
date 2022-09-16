@@ -496,6 +496,10 @@ func (f *freezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hashes []
 			if len(td) == 0 {
 				return fmt.Errorf("total difficulty missing, can't freeze block %d", number)
 			}
+			transferLogs := ReadTransferLogsRLP(nfdb, hash, number)
+			if len(transferLogs) == 0 {
+				return fmt.Errorf("transfer logs missing, can't freeze block %d", number)
+			}
 
 			// Write to the batch.
 			if err := op.AppendRaw(freezerHashTable, number, hash[:]); err != nil {
@@ -512,6 +516,9 @@ func (f *freezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hashes []
 			}
 			if err := op.AppendRaw(freezerDifficultyTable, number, td); err != nil {
 				return fmt.Errorf("can't write td to freezer: %v", err)
+			}
+			if err := op.AppendRaw(freezerTransferLogTable, number, transferLogs); err != nil {
+				return fmt.Errorf("can't write transfer logs to freezer: %v", err)
 			}
 
 			hashes = append(hashes, hash)
