@@ -1980,8 +1980,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		}
 		rawdb.WriteBAL(blockBatch, block.Hash(), block.NumberU64(), block.BAL())
 		if bc.db.HasSeparateStateStore() {
+			rawdb.WriteTransferLogs(bc.db.GetStateStore(), block.Hash(), block.NumberU64(), statedb.TransferLogs())
 			rawdb.WritePreimages(bc.db.GetStateStore(), statedb.Preimages())
 		} else {
+			rawdb.WriteTransferLogs(blockBatch, block.Hash(), block.NumberU64(), statedb.TransferLogs())
 			rawdb.WritePreimages(blockBatch, statedb.Preimages())
 		}
 		if err := blockBatch.Write(); err != nil {
