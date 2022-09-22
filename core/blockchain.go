@@ -1821,8 +1821,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 			rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
 		}
 		if bc.db.StateStore() != nil {
+			rawdb.WriteTransferLogs(bc.db.StateStore(), block.Hash(), block.NumberU64(), statedb.TransferLogs())
 			rawdb.WritePreimages(bc.db.StateStore(), statedb.Preimages())
 		} else {
+			rawdb.WriteTransferLogs(blockBatch, block.Hash(), block.NumberU64(), statedb.TransferLogs())
 			rawdb.WritePreimages(blockBatch, statedb.Preimages())
 		}
 		if err := blockBatch.Write(); err != nil {
