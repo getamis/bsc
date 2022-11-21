@@ -304,9 +304,9 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 	return triedb, snaps, statedb, root, err
 }
 
-func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
-	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
-}
+// func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
+// 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
+// }
 
 func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, snapshotter bool, scheme string) (*trie.Database, *snapshot.Tree, *state.StateDB) {
 	tconf := &trie.Config{Preimages: true}
