@@ -5,7 +5,7 @@ jobs:
   allow_failures:
     - stage: build
       os: osx
-      go: 1.17.x
+      go: 1.19.x
       env:
         - azure-osx
         - azure-ios
@@ -16,7 +16,7 @@ jobs:
     - stage: lint
       os: linux
       dist: bionic
-      go: 1.17.x
+      go: 1.19.x
       env:
         - lint
       git:
@@ -29,7 +29,7 @@ jobs:
       os: linux
       arch: amd64
       dist: bionic
-      go: 1.17.x
+      go: 1.19.x
       env:
         - GO111MODULE=on
       script:
