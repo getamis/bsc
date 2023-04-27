@@ -49,10 +49,9 @@ var (
 type testTxPool struct {
 	pool map[common.Hash]*types.Transaction // Hash map of collected transactions
 
-	pendingLocalTxFeed event.Feed
-	txFeed             event.Feed   // Notification feed to allow waiting for inclusion
-	reannoTxFeed       event.Feed   // Notification feed to trigger reannouce
-	lock               sync.RWMutex // Protects the transaction pool
+	txFeed       event.Feed   // Notification feed to allow waiting for inclusion
+	reannoTxFeed event.Feed   // Notification feed to trigger reannouce
+	lock         sync.RWMutex // Protects the transaction pool
 }
 
 // newTestTxPool creates a mock transaction pool.
@@ -119,10 +118,6 @@ func (p *testTxPool) Pending(enforceTips bool) map[common.Address]types.Transact
 		sort.Sort(types.TxByNonce(batch))
 	}
 	return batches
-}
-
-func (p *testTxPool) SubscribePendingLocalTxsEvent(ch chan<- core.PendingLocalTxsEvent) event.Subscription {
-	return p.pendingLocalTxFeed.Subscribe(ch)
 }
 
 // SubscribeNewTxsEvent should return an event subscription of NewTxsEvent and
