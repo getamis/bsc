@@ -433,7 +433,7 @@ func (api *DebugAPI) GetAccessibleState(from, to rpc.BlockNumber) (uint64, error
 func (api *DebugAPI) GetBlockReceipts(blockHash common.Hash) ([]map[string]interface{}, error) {
 	if receipts := api.eth.blockchain.GetReceiptsByHash(blockHash); receipts != nil {
 		if block := api.eth.blockchain.GetBlockByHash(blockHash); block != nil {
-			return ethapi.ToTxReceipts(block.Header().Number.Uint64(), blockHash, receipts, block)
+			return ethapi.ToTxReceipts(api.eth.APIBackend.ChainConfig(), block.Header().Number.Uint64(), blockHash, receipts, block)
 		}
 	}
 	return nil, errors.New("unknown receipts")
