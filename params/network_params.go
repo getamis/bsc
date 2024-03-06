@@ -54,7 +54,7 @@ const (
 	CheckpointProcessConfirmations = 256
 
 	// StableStateThreshold is the reserve number of block state save to disk before delete ancientdb
-	StableStateThreshold uint64 = 128
+	StableStateThreshold uint64 = 86400
 
 	// LightImmutabilityThreshold is the number of blocks after which a header chain
 	// segment is considered immutable for light client(i.e. soft finality). It is used by
