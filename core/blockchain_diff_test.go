@@ -230,7 +230,7 @@ func (b *testBackend) close() {
 func (b *testBackend) Chain() *BlockChain { return b.chain }
 
 func TestFreezeDiffLayer(t *testing.T) {
-	blockNum := 1024
+	blockNum := 2048
 	fullBackend := newTestBackend(blockNum, true)
 	defer fullBackend.close()
 	for len(fullBackend.chain.diffQueueBuffer) > 0 {

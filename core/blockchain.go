@@ -118,7 +118,7 @@ const (
 	maxBadBlockLimit    = 16
 	maxFutureBlocks     = 256
 	maxTimeFutureBlocks = 30
-	TriesInMemory       = 128
+	TriesInMemory       = 512
 	maxBeyondBlocks     = 2048
 	prefetchTxNumber    = 100
 
@@ -209,7 +209,7 @@ var defaultCacheConfig = &CacheConfig{
 	TrieDirtyLimit: 256,
 	TrieTimeLimit:  5 * time.Minute,
 	SnapshotLimit:  256,
-	TriesInMemory:  128,
+	TriesInMemory:  512,
 	SnapshotWait:   true,
 	StateScheme:    rawdb.HashScheme,
 }
@@ -334,7 +334,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if cacheConfig == nil {
 		cacheConfig = defaultCacheConfig
 	}
-	if cacheConfig.StateScheme == rawdb.HashScheme && cacheConfig.TriesInMemory != 128 {
+	if cacheConfig.StateScheme == rawdb.HashScheme && cacheConfig.TriesInMemory != TriesInMemory {
 		log.Warn("TriesInMemory isn't the default value (128), you need specify the same TriesInMemory when pruning data",
 			"triesInMemory", cacheConfig.TriesInMemory, "scheme", cacheConfig.StateScheme)
 	}
