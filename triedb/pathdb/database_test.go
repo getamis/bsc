@@ -443,9 +443,10 @@ func (t *tester) bottomIndex() int {
 
 func TestDatabaseRollback(t *testing.T) {
 	// Redefine the diff layer depth allowance for faster testing.
-	maxDiffLayers = 4
+	backupMaxDiffLayers := MaxDiffLayers
+	MaxDiffLayers = 4
 	defer func() {
-		maxDiffLayers = 128
+		MaxDiffLayers = backupMaxDiffLayers
 	}()
 
 	// Verify state histories
@@ -481,9 +482,10 @@ func TestDatabaseRollback(t *testing.T) {
 
 func TestDatabaseRecoverable(t *testing.T) {
 	// Redefine the diff layer depth allowance for faster testing.
-	maxDiffLayers = 4
+	backupMaxDiffLayers := MaxDiffLayers
+	MaxDiffLayers = 4
 	defer func() {
-		maxDiffLayers = 128
+		MaxDiffLayers = backupMaxDiffLayers
 	}()
 
 	var (
@@ -526,9 +528,10 @@ func TestDatabaseRecoverable(t *testing.T) {
 
 func TestDisable(t *testing.T) {
 	// Redefine the diff layer depth allowance for faster testing.
-	maxDiffLayers = 4
+	backupMaxDiffLayers := MaxDiffLayers
+	MaxDiffLayers = 4
 	defer func() {
-		maxDiffLayers = 128
+		MaxDiffLayers = backupMaxDiffLayers
 	}()
 
 	tester := newTester(t, 0, false, 32)
@@ -572,9 +575,10 @@ func TestDisable(t *testing.T) {
 
 func TestCommit(t *testing.T) {
 	// Redefine the diff layer depth allowance for faster testing.
-	maxDiffLayers = 4
+	backupMaxDiffLayers := MaxDiffLayers
+	MaxDiffLayers = 4
 	defer func() {
-		maxDiffLayers = 128
+		MaxDiffLayers = backupMaxDiffLayers
 	}()
 
 	tester := newTester(t, 0, false, 12)
@@ -602,9 +606,10 @@ func TestCommit(t *testing.T) {
 
 func TestJournal(t *testing.T) {
 	// Redefine the diff layer depth allowance for faster testing.
-	maxDiffLayers = 4
+	backupMaxDiffLayers := MaxDiffLayers
+	MaxDiffLayers = 4
 	defer func() {
-		maxDiffLayers = 128
+		MaxDiffLayers = backupMaxDiffLayers
 	}()
 
 	tester := newTester(t, 0, false, 12)
@@ -632,9 +637,10 @@ func TestJournal(t *testing.T) {
 
 func TestCorruptedJournal(t *testing.T) {
 	// Redefine the diff layer depth allowance for faster testing.
-	maxDiffLayers = 4
+	backupMaxDiffLayers := MaxDiffLayers
+	MaxDiffLayers = 4
 	defer func() {
-		maxDiffLayers = 128
+		MaxDiffLayers = backupMaxDiffLayers
 	}()
 
 	tester := newTester(t, 0, false, 12)
@@ -680,9 +686,10 @@ func TestCorruptedJournal(t *testing.T) {
 // always falls within the range of [oldest-history-id, latest-history-id].
 func TestTailTruncateHistory(t *testing.T) {
 	// Redefine the diff layer depth allowance for faster testing.
-	maxDiffLayers = 4
+	backupMaxDiffLayers := MaxDiffLayers
+	MaxDiffLayers = 4
 	defer func() {
-		maxDiffLayers = 128
+		MaxDiffLayers = backupMaxDiffLayers
 	}()
 
 	tester := newTester(t, 10, false, 12)
