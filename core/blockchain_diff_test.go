@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 )
 
 var (
@@ -230,7 +231,7 @@ func (b *testBackend) close() {
 func (b *testBackend) Chain() *BlockChain { return b.chain }
 
 func TestFreezeDiffLayer(t *testing.T) {
-	blockNum := 1024
+	blockNum := pathdb.MaxDiffLayers * 2
 	fullBackend := newTestBackend(blockNum, true)
 	defer fullBackend.close()
 	for len(fullBackend.chain.diffQueueBuffer) > 0 {

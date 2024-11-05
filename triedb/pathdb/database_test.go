@@ -34,6 +34,10 @@ import (
 	"github.com/holiman/uint256"
 )
 
+const (
+	layersForTest = 128
+)
+
 func updateTrie(addrHash common.Hash, root common.Hash, dirties, cleans map[common.Hash][]byte) (common.Hash, *trienode.NodeSet) {
 	h, err := newTestHasher(addrHash, root, cleans)
 	if err != nil {
@@ -113,7 +117,22 @@ func newTester(t *testing.T, historyLimit uint64) *tester {
 			snapStorages: make(map[common.Hash]map[common.Hash]map[common.Hash][]byte),
 		}
 	)
-	for i := 0; i < 2*128; i++ {
+
+	for i := 0; i < layersForTest; i++ {
+		var parent = types.EmptyRootHash
+		if len(obj.roots) != 0 {
+			parent = obj.roots[len(obj.roots)-1]
+		}
+		root, nodes, states := obj.generate(parent)
+		if err := db.Update(root, parent, uint64(i), nodes, states); err != nil {
+			panic(fmt.Errorf("failed to update state changes, err: %w", err))
+		}
+		obj.roots = append(obj.roots, root)
+	}
+
+	for i := layersForTest; i < layersForTest*2; i++ {
+		// Commit the state changes to simulate a tree with max diff layer before proceeding to the next layer
+		db.Commit(obj.roots[len(obj.roots)-1], false)
 		var parent = types.EmptyRootHash
 		if len(obj.roots) != 0 {
 			parent = obj.roots[len(obj.roots)-1]

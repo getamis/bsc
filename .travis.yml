@@ -24,11 +24,13 @@ jobs:
       os: linux
       arch: amd64
       dist: bionic
+      vm:
+        size: large
       go: 1.21.x
       env:
         - GO111MODULE=on
       script:
-        - travis_wait 120 go run build/ci.go test $TEST_PACKAGES
+        - travis_wait 120 go run build/ci.go test -timeout 60m $TEST_PACKAGES
 
     - stage: Docker Image Release
       script:
