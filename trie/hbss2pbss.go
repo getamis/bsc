@@ -68,11 +68,11 @@ func (t *Trie) resloveWithoutTrack(n node, prefix []byte) (node, error) {
 
 func (h2p *Hbss2Pbss) writeNode(pathKey []byte, n *trienode.Node, owner common.Hash) {
 	if owner == (common.Hash{}) {
-		rawdb.WriteAccountTrieNode(h2p.db.Disk(), pathKey, n.Blob)
-		log.Debug("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		rawdb.WriteAccountTrieNode(h2p.db.Disk(), pathKey, n.Blob())
+		log.Debug("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob()))
 	} else {
-		rawdb.WriteStorageTrieNode(h2p.db.Disk(), owner, pathKey, n.Blob)
-		log.Debug("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		rawdb.WriteStorageTrieNode(h2p.db.Disk(), owner, pathKey, n.Blob())
+		log.Debug("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob()))
 	}
 }
 
