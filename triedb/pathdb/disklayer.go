@@ -166,9 +166,9 @@ func (dl *diskLayer) node(owner common.Hash, path []byte, hash common.Hash, dept
 	n, found := dl.buffer.node(owner, path)
 	if found {
 		dirtyNodeHitMeter.Mark(1)
-		dirtyNodeReadMeter.Mark(int64(len(n.Blob)))
+		dirtyNodeReadMeter.Mark(int64(n.Len))
 		dirtyNodeHitDepthHist.Update(int64(depth))
-		return n.Blob, n.Hash, &nodeLoc{loc: locDirtyCache, depth: depth}, nil
+		return n.Blob(), n.Hash, &nodeLoc{loc: locDirtyCache, depth: depth}, nil
 	}
 	dirtyNodeMissMeter.Mark(1)
 
