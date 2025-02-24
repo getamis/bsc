@@ -48,7 +48,7 @@ func (r *testReader) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		if n.IsDeleted() || n.Hash != hash {
 			return nil, &MissingNodeError{Owner: owner, Path: path, NodeHash: hash}
 		}
-		return n.Blob, nil
+		return n.Blob(), nil
 	}
 	// Check the node presence in database.
 	return rawdb.ReadTrieNode(r.db, owner, path, hash, r.scheme), nil
@@ -136,11 +136,11 @@ func (db *testDb) Commit(root common.Hash) error {
 				continue
 			}
 			set.ForEachWithOrder(func(path string, n *trienode.Node) {
-				rawdb.WriteTrieNode(db.disk, owner, []byte(path), n.Hash, n.Blob, db.scheme)
+				rawdb.WriteTrieNode(db.disk, owner, []byte(path), n.Hash, n.Blob(), db.scheme)
 			})
 		}
 		nodes.Sets[common.Hash{}].ForEachWithOrder(func(path string, n *trienode.Node) {
-			rawdb.WriteTrieNode(db.disk, common.Hash{}, []byte(path), n.Hash, n.Blob, db.scheme)
+			rawdb.WriteTrieNode(db.disk, common.Hash{}, []byte(path), n.Hash, n.Blob(), db.scheme)
 		})
 		db.root = roots[i]
 	}
