@@ -42,6 +42,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/gofrs/flock"
 )
 
@@ -775,6 +776,11 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 	return db, err
 }
 
+// OpenNodeBlobDB opens the NodeBlob database.
+func (n *Node) OpenNodeBlobDB() error {
+	return trienode.InitNodeBlobDB(n.ResolvePath("nodeblob"), false)
+}
+
 func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, config *ethconfig.Config) (ethdb.Database, error) {
 	var (
 		err                          error
@@ -838,6 +844,12 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 			return nil, err
 		}
 		chainDB.SetDiffStore(diffStore)
+	}
+
+	// open DB for nodeblob
+	if err := n.OpenNodeBlobDB(); err != nil {
+		chainDB.Close()
+		return nil, err
 	}
 
 	return chainDB, nil
