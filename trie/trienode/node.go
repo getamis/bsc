@@ -17,12 +17,26 @@
 package trienode
 
 import (
+	"encoding/binary"
 	"fmt"
 	"maps"
+	"os"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
+
+	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/vfs"
 
 	"github.com/ethereum/go-ethereum/common"
+)
+
+var (
+	once sync.Once
+	db   *pebble.DB
+	cnt  uint64
 )
 
 // Node is a wrapper which contains the encoded blob of the trie node and its
@@ -30,22 +44,124 @@ import (
 // corresponding to different trie implementations.
 type Node struct {
 	Hash common.Hash // Node hash, empty for deleted node
-	Blob []byte      // Encoded node blob, nil for the deleted node
+	Len  int
+	idx  uint64
+}
+
+func (n *Node) Blob() []byte {
+	if n.IsDeleted() {
+		return nil
+	}
+
+	value, closer, _ := db.Get(n.key())
+	ret := make([]byte, len(value))
+	copy(ret, value)
+	_ = closer.Close()
+	return ret
+}
+
+type HashBlob struct {
+	Hash common.Hash
+	Blob []byte
+}
+
+const bulkGetNodesConcurrency = 64
+
+func BulkGetNodes(nodes []*Node) map[common.Hash][]byte {
+	ret := make(map[common.Hash][]byte)
+	nodeCh := make(chan *Node, len(nodes))
+	resultCh := make(chan *HashBlob, len(nodes))
+	var wg sync.WaitGroup
+
+	for i := 0; i < min(bulkGetNodesConcurrency, len(nodes)); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for node := range nodeCh {
+				resultCh <- &HashBlob{Hash: node.Hash, Blob: node.Blob()}
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	for _, node := range nodes {
+		nodeCh <- node
+	}
+	close(nodeCh)
+
+	for hashBlob := range resultCh {
+		ret[hashBlob.Hash] = hashBlob.Blob
+	}
+	return ret
 }
 
 // Size returns the total memory size used by this node.
 func (n *Node) Size() int {
-	return len(n.Blob) + common.HashLength
+	return n.Len + common.HashLength
 }
 
 // IsDeleted returns the indicator if the node is marked as deleted.
 func (n *Node) IsDeleted() bool {
-	return len(n.Blob) == 0
+	return n.Len == 0
+}
+
+func (n *Node) key() []byte {
+	key := make([]byte, 8)
+	binary.BigEndian.PutUint64(key, n.idx)
+	key = append(n.Hash.Bytes(), key...)
+	return key
+}
+
+func InitDB(name string, inMemory bool) error {
+	// Already initialized
+	if db != nil {
+		return nil
+	}
+
+	// Use in-memory DB if no name is provided
+	if name == "" && !inMemory {
+		inMemory = true
+	}
+
+	opts := &pebble.Options{
+		Cache: pebble.NewCache(int64(1024 * 1024 * 1024)),
+	}
+	if inMemory {
+		opts.FS = vfs.NewMem()
+		name = "" // Empty name for in-memory DB
+	} else {
+		if err := os.RemoveAll(name); err != nil {
+			return err
+		}
+	}
+
+	var err error
+	db, err = pebble.Open(name, opts)
+	return err
 }
 
 // New constructs a node with provided node information.
 func New(hash common.Hash, blob []byte) *Node {
-	return &Node{Hash: hash, Blob: blob}
+	// Initialize the database for testing
+	once.Do(func() {
+		InitDB("", true)
+	})
+
+	// Increase the counter
+	idx := atomic.AddUint64(&cnt, 1)
+	n := &Node{Hash: hash, Len: len(blob), idx: idx}
+
+	// Insert the node blob into the database
+	_ = db.Set(n.key(), blob, pebble.NoSync)
+
+	// Set the finalizer to delete the node blob from the database
+	runtime.SetFinalizer(n, func(n *Node) {
+		_ = db.Delete(n.key(), pebble.NoSync)
+	})
+	return n
 }
 
 // NewDeleted constructs a node which is deleted.
@@ -157,7 +273,7 @@ func (set *NodeSet) Size() (int, int) {
 func (set *NodeSet) HashSet() map[common.Hash][]byte {
 	ret := make(map[common.Hash][]byte, len(set.Nodes))
 	for _, n := range set.Nodes {
-		ret[n.Hash] = n.Blob
+		ret[n.Hash] = n.Blob()
 	}
 	return ret
 }
