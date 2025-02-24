@@ -50,12 +50,12 @@ func writeNodes(batch ethdb.Batch, nodes map[common.Hash]map[string]*trienode.No
 				}
 			} else {
 				if owner == (common.Hash{}) {
-					rawdb.WriteAccountTrieNode(batch, []byte(path), n.Blob)
+					rawdb.WriteAccountTrieNode(batch, []byte(path), n.Blob())
 				} else {
-					rawdb.WriteStorageTrieNode(batch, owner, []byte(path), n.Blob)
+					rawdb.WriteStorageTrieNode(batch, owner, []byte(path), n.Blob())
 				}
 				if clean != nil {
-					clean.Set(nodeCacheKey(owner, []byte(path)), n.Blob)
+					clean.Set(nodeCacheKey(owner, []byte(path)), n.Blob())
 				}
 			}
 		}

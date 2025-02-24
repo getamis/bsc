@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"sync"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -60,7 +61,7 @@ func (s *nodeSet) computeSize() {
 			prefix = common.HashLength // owner (32 bytes) for storage trie nodes
 		}
 		for path, n := range subset {
-			size += uint64(prefix + len(n.Blob) + len(path))
+			size += uint64(prefix + n.Len + len(path))
 		}
 	}
 	s.size = size
@@ -105,7 +106,7 @@ func (s *nodeSet) merge(set *nodeSet) {
 		current, exist := s.nodes[owner]
 		if !exist {
 			for path, n := range subset {
-				delta += int64(prefix + len(n.Blob) + len(path))
+				delta += int64(prefix + n.Len + len(path))
 			}
 			// Perform a shallow copy of the map for the subset instead of claiming it
 			// directly from the provided nodeset to avoid potential concurrent map
@@ -118,10 +119,10 @@ func (s *nodeSet) merge(set *nodeSet) {
 		}
 		for path, n := range subset {
 			if orig, exist := current[path]; !exist {
-				delta += int64(prefix + len(n.Blob) + len(path))
+				delta += int64(prefix + n.Len + len(path))
 			} else {
-				delta += int64(len(n.Blob) - len(orig.Blob))
-				overwrite.add(prefix + len(orig.Blob) + len(path))
+				delta += int64(n.Len - orig.Len)
+				overwrite.add(prefix + orig.Len + len(path))
 			}
 			current[path] = n
 		}
@@ -157,13 +158,13 @@ func (s *nodeSet) revertTo(db ethdb.KeyValueReader, nodes map[common.Hash]map[st
 					blob = rawdb.ReadStorageTrieNode(db, owner, []byte(path))
 				}
 				// Ignore the clean node in the case described above.
-				if bytes.Equal(blob, n.Blob) {
+				if bytes.Equal(blob, n.Blob()) {
 					continue
 				}
-				panic(fmt.Sprintf("non-existent node (%x %v) blob: %v", owner, path, crypto.Keccak256Hash(n.Blob).Hex()))
+				panic(fmt.Sprintf("non-existent node (%x %v) blob: %v", owner, path, crypto.Keccak256Hash(n.Blob()).Hex()))
 			}
 			current[path] = n
-			delta += int64(len(n.Blob)) - int64(len(orig.Blob))
+			delta += int64(n.Len - orig.Len)
 		}
 	}
 	s.updateSize(delta)
@@ -182,17 +183,34 @@ type journalNodes struct {
 	Nodes []journalNode
 }
 
+const bulkGetNodesConcurrency = 256
+
 // encode serializes the content of trie nodes into the provided writer.
 func (s *nodeSet) encode(w io.Writer) error {
 	nodes := make([]journalNodes, 0, len(s.nodes))
 	for owner, subset := range s.nodes {
 		entry := journalNodes{Owner: owner}
+		wg := sync.WaitGroup{}
+		sem := make(chan struct{}, bulkGetNodesConcurrency)
+		mu := sync.Mutex{}
 		for path, node := range subset {
-			entry.Nodes = append(entry.Nodes, journalNode{
-				Path: []byte(path),
-				Blob: node.Blob,
-			})
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer func() {
+					wg.Done()
+					<-sem
+				}()
+				blob := node.Blob()
+				mu.Lock()
+				defer mu.Unlock()
+				entry.Nodes = append(entry.Nodes, journalNode{
+					Path: []byte(path),
+					Blob: blob,
+				})
+			}()
 		}
+		wg.Wait()
 		nodes = append(nodes, entry)
 	}
 	return rlp.Encode(w, nodes)
@@ -205,17 +223,34 @@ func (s *nodeSet) decode(r *rlp.Stream) error {
 		return fmt.Errorf("load nodes: %v", err)
 	}
 	nodes := make(map[common.Hash]map[string]*trienode.Node)
+	wg := sync.WaitGroup{}
+	sem := make(chan struct{}, 8)
+	mu := sync.Mutex{}
 	for _, entry := range encoded {
 		subset := make(map[string]*trienode.Node)
 		for _, n := range entry.Nodes {
-			if len(n.Blob) > 0 {
-				subset[string(n.Path)] = trienode.New(crypto.Keccak256Hash(n.Blob), n.Blob)
-			} else {
-				subset[string(n.Path)] = trienode.NewDeleted()
-			}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer func() {
+					wg.Done()
+					<-sem
+				}()
+
+				var node *trienode.Node
+				if len(n.Blob) > 0 {
+					node = trienode.New(crypto.Keccak256Hash(n.Blob), n.Blob)
+				} else {
+					node = trienode.NewDeleted()
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				subset[string(n.Path)] = node
+			}()
 		}
 		nodes[entry.Owner] = subset
 	}
+	wg.Wait()
 	s.nodes = nodes
 	s.computeSize()
 	return nil
