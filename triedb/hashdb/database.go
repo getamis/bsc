@@ -568,7 +568,7 @@ func (db *Database) Update(root common.Hash, parent common.Hash, block uint64, n
 			if n.IsDeleted() {
 				return // ignore deletion
 			}
-			db.insert(n.Hash, n.Blob)
+			db.insert(n.Hash, n.Blob())
 		})
 	}
 	// Link up the account trie and storage trie if the node points
