@@ -32,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
 var (
@@ -515,6 +516,12 @@ func (db *Database) Journal(root common.Hash) error {
 	// Run the journaling
 	db.lock.Lock()
 	defer db.lock.Unlock()
+
+	// Disable GC for the NodeBlob DB
+	trienode.DisableGCForDB()
+
+	// Compact the NodeBlob DB
+	trienode.CompactNodeBlobDB()
 
 	// Retrieve the head layer to journal from.
 	l := db.tree.get(root)
