@@ -25,6 +25,8 @@ jobs:
       os: linux
       arch: amd64
       dist: focal
+      vm:
+        size: large
       go: 1.23.x
       env:
         - GO111MODULE=on
