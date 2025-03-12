@@ -28,6 +28,8 @@ jobs:
       go: 1.23.x
       env:
         - GO111MODULE=on
+      vm:
+        size: large
       script:
         - travis_wait 120 go run build/ci.go test $TEST_PACKAGES -timeout 120m
 
