@@ -314,11 +314,38 @@ func testStatesEncode(t *testing.T, rawStorageKey bool) {
 	if err := dec.decode(rlp.NewStream(buf, 0)); err != nil {
 		t.Fatalf("Failed to decode states, %v", err)
 	}
-	if !reflect.DeepEqual(s.accountData, dec.accountData) {
+	if len(s.accountData) != len(dec.accountData) {
 		t.Fatal("Unexpected account data")
 	}
-	if !reflect.DeepEqual(s.storageData, dec.storageData) {
+	for addrHash, blob := range s.accountData {
+		decBlob, ok := dec.accountData[addrHash]
+		if !ok {
+			t.Fatal("Unexpected account data")
+		}
+		if !bytes.Equal(blob.Blob(), decBlob.Blob()) {
+			t.Fatal("Unexpected account data")
+		}
+	}
+	if len(s.storageData) != len(dec.storageData) {
 		t.Fatal("Unexpected storage data")
+	}
+	for addrHash, storage := range s.storageData {
+		decStorage, ok := dec.storageData[addrHash]
+		if !ok {
+			t.Fatal("Unexpected storage data")
+		}
+		if len(storage) != len(decStorage) {
+			t.Fatal("Unexpected storage data")
+		}
+		for slotHash, blob := range storage {
+			decBlob, ok := decStorage[slotHash]
+			if !ok {
+				t.Fatal("Unexpected storage data")
+			}
+			if !bytes.Equal(blob.Blob(), decBlob.Blob()) {
+				t.Fatal("Unexpected storage data")
+			}
+		}
 	}
 	if s.rawStorageKey != dec.rawStorageKey {
 		t.Fatal("Unexpected rawStorageKey flag")
@@ -358,11 +385,38 @@ func testStateWithOriginEncode(t *testing.T, rawStorageKey bool) {
 	if err := dec.decode(rlp.NewStream(buf, 0)); err != nil {
 		t.Fatalf("Failed to decode states, %v", err)
 	}
-	if !reflect.DeepEqual(s.accountData, dec.accountData) {
+	if len(s.accountData) != len(dec.accountData) {
 		t.Fatal("Unexpected account data")
 	}
-	if !reflect.DeepEqual(s.storageData, dec.storageData) {
+	for addrHash, blob := range s.accountData {
+		decBlob, ok := dec.accountData[addrHash]
+		if !ok {
+			t.Fatal("Unexpected account data")
+		}
+		if !bytes.Equal(blob.Blob(), decBlob.Blob()) {
+			t.Fatal("Unexpected account data")
+		}
+	}
+	if len(s.storageData) != len(dec.storageData) {
 		t.Fatal("Unexpected storage data")
+	}
+	for addrHash, storage := range s.storageData {
+		decStorage, ok := dec.storageData[addrHash]
+		if !ok {
+			t.Fatal("Unexpected storage data")
+		}
+		if len(storage) != len(decStorage) {
+			t.Fatal("Unexpected storage data")
+		}
+		for slotHash, blob := range storage {
+			decBlob, ok := decStorage[slotHash]
+			if !ok {
+				t.Fatal("Unexpected storage data")
+			}
+			if !bytes.Equal(blob.Blob(), decBlob.Blob()) {
+				t.Fatal("Unexpected storage data")
+			}
+		}
 	}
 	if !reflect.DeepEqual(s.accountOrigin, dec.accountOrigin) {
 		t.Fatal("Unexpected account origin data")
