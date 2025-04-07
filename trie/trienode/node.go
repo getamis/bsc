@@ -21,7 +21,9 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 
+	"github.com/ethereum/go-ethereum/blobdb"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -29,23 +31,69 @@ import (
 // node hash. It is general enough that can be used to represent trie node
 // corresponding to different trie implementations.
 type Node struct {
-	Hash common.Hash // Node hash, empty for deleted node
-	Blob []byte      // Encoded node blob, nil for the deleted node
+	Hash common.Hash  // Node hash, empty for deleted node
+	blob *blobdb.Blob // Encoded node blob, nil for the deleted node
+}
+
+type HashBlob struct {
+	Hash common.Hash
+	Blob []byte
+}
+
+const bulkGetNodesConcurrency = 64
+
+func BulkGetNodes(nodes []*Node) map[common.Hash][]byte {
+	ret := make(map[common.Hash][]byte)
+	nodeCh := make(chan *Node, len(nodes))
+	resultCh := make(chan *HashBlob, len(nodes))
+	var wg sync.WaitGroup
+
+	for i := 0; i < min(bulkGetNodesConcurrency, len(nodes)); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for node := range nodeCh {
+				resultCh <- &HashBlob{Hash: node.Hash, Blob: node.Blob()}
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	for _, node := range nodes {
+		nodeCh <- node
+	}
+	close(nodeCh)
+
+	for hashBlob := range resultCh {
+		ret[hashBlob.Hash] = hashBlob.Blob
+	}
+	return ret
 }
 
 // Size returns the total memory size used by this node.
 func (n *Node) Size() int {
-	return len(n.Blob) + common.HashLength
+	return n.blob.Len + common.HashLength
 }
 
 // IsDeleted returns the indicator if the node is marked as deleted.
 func (n *Node) IsDeleted() bool {
-	return len(n.Blob) == 0
+	return n.blob.Len == 0
+}
+
+func (n *Node) Blob() []byte {
+	return n.blob.Blob()
+}
+
+func (n *Node) Len() int {
+	return n.blob.Len
 }
 
 // New constructs a node with provided node information.
 func New(hash common.Hash, blob []byte) *Node {
-	return &Node{Hash: hash, Blob: blob}
+	return &Node{Hash: hash, blob: blobdb.New(blob)}
 }
 
 // NewDeleted constructs a node which is deleted.
@@ -157,7 +205,7 @@ func (set *NodeSet) Size() (int, int) {
 func (set *NodeSet) HashSet() map[common.Hash][]byte {
 	ret := make(map[common.Hash][]byte, len(set.Nodes))
 	for _, n := range set.Nodes {
-		ret[n.Hash] = n.Blob
+		ret[n.Hash] = n.Blob()
 	}
 	return ret
 }

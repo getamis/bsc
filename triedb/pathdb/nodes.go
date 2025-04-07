@@ -60,7 +60,7 @@ func (s *nodeSet) computeSize() {
 			prefix = common.HashLength // owner (32 bytes) for storage trie nodes
 		}
 		for path, n := range subset {
-			size += uint64(prefix + len(n.Blob) + len(path))
+			size += uint64(prefix + n.Len() + len(path))
 		}
 	}
 	s.size = size
@@ -105,7 +105,7 @@ func (s *nodeSet) merge(set *nodeSet) {
 		current, exist := s.nodes[owner]
 		if !exist {
 			for path, n := range subset {
-				delta += int64(prefix + len(n.Blob) + len(path))
+				delta += int64(prefix + n.Len() + len(path))
 			}
 			// Perform a shallow copy of the map for the subset instead of claiming it
 			// directly from the provided nodeset to avoid potential concurrent map
@@ -118,10 +118,10 @@ func (s *nodeSet) merge(set *nodeSet) {
 		}
 		for path, n := range subset {
 			if orig, exist := current[path]; !exist {
-				delta += int64(prefix + len(n.Blob) + len(path))
+				delta += int64(prefix + n.Len() + len(path))
 			} else {
-				delta += int64(len(n.Blob) - len(orig.Blob))
-				overwrite.add(prefix + len(orig.Blob) + len(path))
+				delta += int64(n.Len() - orig.Len())
+				overwrite.add(prefix + orig.Len() + len(path))
 			}
 			current[path] = n
 		}
@@ -157,13 +157,13 @@ func (s *nodeSet) revertTo(db ethdb.KeyValueReader, nodes map[common.Hash]map[st
 					blob = rawdb.ReadStorageTrieNode(db, owner, []byte(path))
 				}
 				// Ignore the clean node in the case described above.
-				if bytes.Equal(blob, n.Blob) {
+				if bytes.Equal(blob, n.Blob()) {
 					continue
 				}
-				panic(fmt.Sprintf("non-existent node (%x %v) blob: %v", owner, path, crypto.Keccak256Hash(n.Blob).Hex()))
+				panic(fmt.Sprintf("non-existent node (%x %v) blob: %v", owner, path, crypto.Keccak256Hash(n.Blob()).Hex()))
 			}
 			current[path] = n
-			delta += int64(len(n.Blob)) - int64(len(orig.Blob))
+			delta += int64(n.Len()) - int64(orig.Len())
 		}
 	}
 	s.updateSize(delta)
@@ -185,12 +185,20 @@ type journalNodes struct {
 // encode serializes the content of trie nodes into the provided writer.
 func (s *nodeSet) encode(w io.Writer) error {
 	nodes := make([]journalNodes, 0, len(s.nodes))
+	var trieNodes []*trienode.Node
+	for _, subset := range s.nodes {
+		for _, node := range subset {
+			trieNodes = append(trieNodes, node)
+		}
+	}
+	hashBlobs := trienode.BulkGetNodes(trieNodes)
+
 	for owner, subset := range s.nodes {
 		entry := journalNodes{Owner: owner}
 		for path, node := range subset {
 			entry.Nodes = append(entry.Nodes, journalNode{
 				Path: []byte(path),
-				Blob: node.Blob,
+				Blob: hashBlobs[node.Hash],
 			})
 		}
 		nodes = append(nodes, entry)

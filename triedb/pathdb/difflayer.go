@@ -216,8 +216,8 @@ func (dl *diffLayer) node(owner common.Hash, path []byte, hash common.Hash, dept
 			// The query from the hash map is fastpath,
 			// avoiding recursive query of 128 difflayers.
 			diffHashCacheHitMeter.Mark(1)
-			diffHashCacheReadMeter.Mark(int64(len(n.Blob)))
-			return n.Blob, n.Hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
+			diffHashCacheReadMeter.Mark(int64(n.Len()))
+			return n.Blob(), n.Hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
 		}
 	}
 
@@ -254,8 +254,8 @@ func (dl *diffLayer) intervalNode(owner common.Hash, path []byte, hash common.Ha
 	if ok {
 		dirtyNodeHitMeter.Mark(1)
 		dirtyNodeHitDepthHist.Update(int64(depth))
-		dirtyNodeReadMeter.Mark(int64(len(n.Blob)))
-		return n.Blob, n.Hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
+		dirtyNodeReadMeter.Mark(int64(n.Len()))
+		return n.Blob(), n.Hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
 	}
 	// Trie node unknown to this layer, resolve from parent
 	if diff, ok := dl.parent.(*diffLayer); ok {
