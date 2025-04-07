@@ -31,6 +31,7 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/blobdb"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -774,6 +775,11 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 	return db, err
 }
 
+// OpenBlobDB opens the blob database.
+func (n *Node) OpenBlobDB() error {
+	return blobdb.InitDB(n.ResolvePath("nodeblob"), false)
+}
+
 func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, config *ethconfig.Config) (ethdb.Database, error) {
 	var (
 		err                          error
@@ -837,6 +843,12 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 			return nil, err
 		}
 		chainDB.SetDiffStore(diffStore)
+	}
+
+	// open DB for blob
+	if err := n.OpenBlobDB(); err != nil {
+		chainDB.Close()
+		return nil, err
 	}
 
 	return chainDB, nil
