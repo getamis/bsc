@@ -8,6 +8,7 @@ import (
 
 	"github.com/VictoriaMetrics/fastcache"
 
+	"github.com/ethereum/go-ethereum/blobdb"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -284,10 +285,10 @@ func copyNodeCache(n *nodecache) *nodecache {
 	}
 	nc.nodes.size = n.nodes.size
 
-	storageData := make(map[common.Hash]map[common.Hash][]byte, len(n.states.storageData))
+	storageData := make(map[common.Hash]map[common.Hash]*blobdb.Blob, len(n.states.storageData))
 	for accountHash, storage := range n.states.storageData {
 		storageData[accountHash] = maps.Clone(storage)
 	}
-	nc.states = newStates(maps.Clone(n.states.accountData), storageData, n.states.rawStorageKey)
+	nc.states = newStatesWithBlob(maps.Clone(n.states.accountData), storageData, n.states.rawStorageKey)
 	return nc
 }

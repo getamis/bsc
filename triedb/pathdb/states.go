@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/ethereum/go-ethereum/blobdb"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -58,9 +59,9 @@ func (c *counter) report(count, size *metrics.Meter) {
 // subsequent state access will be denied due to the stale flag. Therefore,
 // state access and mutation won't happen at the same time with guarantee.
 type stateSet struct {
-	accountData map[common.Hash][]byte                 // Keyed accounts for direct retrieval (nil means deleted)
-	storageData map[common.Hash]map[common.Hash][]byte // Keyed storage slots for direct retrieval. one per account (nil means deleted)
-	size        uint64                                 // Memory size of the state data (accountData and storageData)
+	accountData map[common.Hash]*blobdb.Blob                 // Keyed accounts for direct retrieval (nil means deleted)
+	storageData map[common.Hash]map[common.Hash]*blobdb.Blob // Keyed storage slots for direct retrieval. one per account (nil means deleted)
+	size        uint64                                       // Memory size of the state data (accountData and storageData)
 
 	accountListSorted []common.Hash                 // List of account for iteration. If it exists, it's sorted, otherwise it's nil
 	storageListSorted map[common.Hash][]common.Hash // List of storage slots for iterated retrievals, one per account. Any existing lists are sorted if non-nil
@@ -76,11 +77,47 @@ type stateSet struct {
 // newStates constructs the state set with the provided account and storage data.
 func newStates(accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, rawStorageKey bool) *stateSet {
 	// Don't panic for the lazy callers, initialize the nil maps instead.
+	var accountData map[common.Hash]*blobdb.Blob
+	var storageData map[common.Hash]map[common.Hash]*blobdb.Blob
+
 	if accounts == nil {
-		accounts = make(map[common.Hash][]byte)
+		accountData = make(map[common.Hash]*blobdb.Blob)
+	} else {
+		accountData = make(map[common.Hash]*blobdb.Blob, len(accounts))
+		for addrHash, blob := range accounts {
+			accountData[addrHash] = blobdb.New(blob)
+		}
+	}
+
+	if storages == nil {
+		storageData = make(map[common.Hash]map[common.Hash]*blobdb.Blob)
+	} else {
+		storageData = make(map[common.Hash]map[common.Hash]*blobdb.Blob, len(storages))
+		for addrHash, slots := range storages {
+			storageData[addrHash] = make(map[common.Hash]*blobdb.Blob, len(slots))
+			for storageHash, blob := range slots {
+				storageData[addrHash][storageHash] = blobdb.New(blob)
+			}
+		}
+	}
+	s := &stateSet{
+		accountData:       accountData,
+		storageData:       storageData,
+		rawStorageKey:     rawStorageKey,
+		storageListSorted: make(map[common.Hash][]common.Hash),
+	}
+	s.size = s.check()
+	return s
+}
+
+// newStatesWithBlob constructs the state set with the provided account and storage data.
+func newStatesWithBlob(accounts map[common.Hash]*blobdb.Blob, storages map[common.Hash]map[common.Hash]*blobdb.Blob, rawStorageKey bool) *stateSet {
+	// Don't panic for the lazy callers, initialize the nil maps instead.
+	if accounts == nil {
+		accounts = make(map[common.Hash]*blobdb.Blob)
 	}
 	if storages == nil {
-		storages = make(map[common.Hash]map[common.Hash][]byte)
+		storages = make(map[common.Hash]map[common.Hash]*blobdb.Blob)
 	}
 	s := &stateSet{
 		accountData:       accounts,
@@ -96,7 +133,7 @@ func newStates(accounts map[common.Hash][]byte, storages map[common.Hash]map[com
 func (s *stateSet) account(hash common.Hash) ([]byte, bool) {
 	// If the account is known locally, return it
 	if data, ok := s.accountData[hash]; ok {
-		return data, true
+		return data.Blob(), true
 	}
 	return nil, false // account is unknown in this set
 }
@@ -107,7 +144,7 @@ func (s *stateSet) account(hash common.Hash) ([]byte, bool) {
 func (s *stateSet) mustAccount(hash common.Hash) ([]byte, error) {
 	// If the account is known locally, return it
 	if data, ok := s.accountData[hash]; ok {
-		return data, nil
+		return data.Blob(), nil
 	}
 	return nil, fmt.Errorf("account is not found, %x", hash)
 }
@@ -118,7 +155,7 @@ func (s *stateSet) storage(accountHash, storageHash common.Hash) ([]byte, bool) 
 	// If the account is known locally, try to resolve the slot locally
 	if storage, ok := s.storageData[accountHash]; ok {
 		if data, ok := storage[storageHash]; ok {
-			return data, true
+			return data.Blob(), true
 		}
 	}
 	return nil, false // storage is unknown in this set
@@ -131,7 +168,7 @@ func (s *stateSet) mustStorage(accountHash, storageHash common.Hash) ([]byte, er
 	// If the account is known locally, try to resolve the slot locally
 	if storage, ok := s.storageData[accountHash]; ok {
 		if data, ok := storage[storageHash]; ok {
-			return data, nil
+			return data.Blob(), nil
 		}
 	}
 	return nil, fmt.Errorf("storage slot is not found, %x %x", accountHash, storageHash)
@@ -142,14 +179,14 @@ func (s *stateSet) mustStorage(accountHash, storageHash common.Hash) ([]byte, er
 func (s *stateSet) check() uint64 {
 	var size int
 	for _, blob := range s.accountData {
-		size += common.HashLength + len(blob)
+		size += common.HashLength + blob.Len
 	}
 	for accountHash, slots := range s.storageData {
 		if slots == nil {
 			panic(fmt.Sprintf("storage %#x nil", accountHash)) // nil slots is not permitted
 		}
 		for _, blob := range slots {
-			size += 2*common.HashLength + len(blob)
+			size += 2*common.HashLength + blob.Len
 		}
 	}
 	return uint64(size)
@@ -234,10 +271,10 @@ func (s *stateSet) merge(other *stateSet) {
 	// Apply the updated account data
 	for accountHash, data := range other.accountData {
 		if origin, ok := s.accountData[accountHash]; ok {
-			delta += len(data) - len(origin)
-			accountOverwrites.add(common.HashLength + len(origin))
+			delta += data.Len - origin.Len
+			accountOverwrites.add(common.HashLength + origin.Len)
 		} else {
-			delta += common.HashLength + len(data)
+			delta += common.HashLength + data.Len
 		}
 		s.accountData[accountHash] = data
 	}
@@ -250,10 +287,10 @@ func (s *stateSet) merge(other *stateSet) {
 			// passed external set. Even after merging, the slots belonging to the
 			// external state set remain accessible, so ownership of the map should
 			// not be taken, and any mutation on it should be avoided.
-			slots := make(map[common.Hash][]byte, len(storage))
+			slots := make(map[common.Hash]*blobdb.Blob, len(storage))
 			for storageHash, data := range storage {
 				slots[storageHash] = data
-				delta += 2*common.HashLength + len(data)
+				delta += 2*common.HashLength + data.Len
 			}
 			s.storageData[accountHash] = slots
 			continue
@@ -262,10 +299,10 @@ func (s *stateSet) merge(other *stateSet) {
 		slots := s.storageData[accountHash]
 		for storageHash, data := range storage {
 			if origin, ok := slots[storageHash]; ok {
-				delta += len(data) - len(origin)
-				storageOverwrites.add(2*common.HashLength + len(origin))
+				delta += data.Len - origin.Len
+				storageOverwrites.add(2*common.HashLength + origin.Len)
 			} else {
-				delta += 2*common.HashLength + len(data)
+				delta += 2*common.HashLength + data.Len
 			}
 			slots[storageHash] = data
 		}
@@ -291,11 +328,11 @@ func (s *stateSet) revertTo(accountOrigin map[common.Hash][]byte, storageOrigin 
 		if !ok {
 			panic(fmt.Sprintf("non-existent account for reverting, %x", addrHash))
 		}
-		if len(data) == 0 && len(blob) == 0 {
+		if data.Len == 0 && len(blob) == 0 {
 			panic(fmt.Sprintf("invalid account mutation (null to null), %x", addrHash))
 		}
-		delta += len(blob) - len(data)
-		s.accountData[addrHash] = blob
+		delta += len(blob) - data.Len
+		s.accountData[addrHash] = blobdb.New(blob)
 	}
 	// Overwrite the storage data with original value blindly
 	for addrHash, storage := range storageOrigin {
@@ -308,11 +345,11 @@ func (s *stateSet) revertTo(accountOrigin map[common.Hash][]byte, storageOrigin 
 			if !ok {
 				panic(fmt.Sprintf("non-existent storage slot for reverting, %x-%x", addrHash, storageHash))
 			}
-			if len(blob) == 0 && len(data) == 0 {
+			if len(blob) == 0 && data.Len == 0 {
 				panic(fmt.Sprintf("invalid storage slot mutation (null to null), %x-%x", addrHash, storageHash))
 			}
-			delta += len(blob) - len(data)
-			slots[storageHash] = blob
+			delta += len(blob) - data.Len
+			slots[storageHash] = blobdb.New(blob)
 		}
 	}
 	s.clearLists()
@@ -343,7 +380,7 @@ func (s *stateSet) encode(w io.Writer) error {
 	var enc accounts
 	for addrHash, blob := range s.accountData {
 		enc.AddrHashes = append(enc.AddrHashes, addrHash)
-		enc.Accounts = append(enc.Accounts, blob)
+		enc.Accounts = append(enc.Accounts, blob.Blob())
 	}
 	if err := rlp.Encode(w, enc); err != nil {
 		return err
@@ -360,7 +397,7 @@ func (s *stateSet) encode(w io.Writer) error {
 		vals := make([][]byte, 0, len(slots))
 		for key, val := range slots {
 			keys = append(keys, key)
-			vals = append(vals, val)
+			vals = append(vals, val.Blob())
 		}
 		storages = append(storages, Storage{
 			AddrHash: addrHash,
@@ -382,13 +419,13 @@ func (s *stateSet) decode(r *rlp.Stream) error {
 	}
 	var (
 		dec        accounts
-		accountSet = make(map[common.Hash][]byte)
+		accountSet = make(map[common.Hash]*blobdb.Blob)
 	)
 	if err := r.Decode(&dec); err != nil {
 		return fmt.Errorf("load diff accounts: %v", err)
 	}
 	for i := 0; i < len(dec.AddrHashes); i++ {
-		accountSet[dec.AddrHashes[i]] = dec.Accounts[i]
+		accountSet[dec.AddrHashes[i]] = blobdb.New(dec.Accounts[i])
 	}
 	s.accountData = accountSet
 
@@ -400,15 +437,15 @@ func (s *stateSet) decode(r *rlp.Stream) error {
 	}
 	var (
 		storages   []storage
-		storageSet = make(map[common.Hash]map[common.Hash][]byte)
+		storageSet = make(map[common.Hash]map[common.Hash]*blobdb.Blob)
 	)
 	if err := r.Decode(&storages); err != nil {
 		return fmt.Errorf("load diff storage: %v", err)
 	}
 	for _, entry := range storages {
-		storageSet[entry.AddrHash] = make(map[common.Hash][]byte, len(entry.Keys))
+		storageSet[entry.AddrHash] = make(map[common.Hash]*blobdb.Blob, len(entry.Keys))
 		for i := 0; i < len(entry.Keys); i++ {
-			storageSet[entry.AddrHash][entry.Keys[i]] = entry.Vals[i]
+			storageSet[entry.AddrHash][entry.Keys[i]] = blobdb.New(entry.Vals[i])
 		}
 	}
 	s.storageData = storageSet
@@ -421,8 +458,8 @@ func (s *stateSet) decode(r *rlp.Stream) error {
 // reset clears all cached state data, including any optional sorted lists that
 // may have been generated.
 func (s *stateSet) reset() {
-	s.accountData = make(map[common.Hash][]byte)
-	s.storageData = make(map[common.Hash]map[common.Hash][]byte)
+	s.accountData = make(map[common.Hash]*blobdb.Blob)
+	s.storageData = make(map[common.Hash]map[common.Hash]*blobdb.Blob)
 	s.size = 0
 	s.accountListSorted = nil
 	s.storageListSorted = make(map[common.Hash][]common.Hash)
