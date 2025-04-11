@@ -17,6 +17,7 @@
 package trienode
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -38,6 +39,23 @@ var (
 	db   *pebble.DB
 	cnt  uint64
 )
+
+func Get(hash common.Hash) []byte {
+	iter, _ := db.NewIter(nil)
+	defer iter.Close()
+
+	if iter.SeekGE(hash.Bytes()); iter.Valid() {
+		key := iter.Key()
+		if bytes.Equal(key[:common.HashLength], hash.Bytes()) {
+			value, _ := iter.ValueAndErr()
+			ret := make([]byte, len(value))
+			copy(ret, value)
+			return ret
+		}
+	}
+
+	return nil
+}
 
 // Node is a wrapper which contains the encoded blob of the trie node and its
 // node hash. It is general enough that can be used to represent trie node
