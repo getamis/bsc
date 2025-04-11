@@ -25,10 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
-type RefTrieNode struct {
-	refCount uint32
-	node     *trienode.Node
-}
+type RefTrieNode struct{}
 
 type HashNodeCache struct {
 	lock  sync.RWMutex
@@ -44,48 +41,18 @@ func (h *HashNodeCache) length() int {
 	return len(h.cache)
 }
 
-func (h *HashNodeCache) set(hash common.Hash, node *trienode.Node) {
-	if h == nil {
-		return
-	}
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	if n, ok := h.cache[hash]; ok {
-		n.refCount++
-	} else {
-		h.cache[hash] = &RefTrieNode{1, node}
-	}
-}
+func (h *HashNodeCache) set(hash common.Hash, node *trienode.Node) {}
 
-func (h *HashNodeCache) Get(hash common.Hash) *trienode.Node {
+func (h *HashNodeCache) Get(hash common.Hash) []byte {
 	if h == nil {
 		return nil
 	}
 	h.lock.RLock()
 	defer h.lock.RUnlock()
-	if n, ok := h.cache[hash]; ok {
-		return n.node
-	}
-	return nil
+	return trienode.Get(hash)
 }
 
-func (h *HashNodeCache) del(hash common.Hash) {
-	if h == nil {
-		return
-	}
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	n, ok := h.cache[hash]
-	if !ok {
-		return
-	}
-	if n.refCount > 0 {
-		n.refCount--
-	}
-	if n.refCount == 0 {
-		delete(h.cache, hash)
-	}
-}
+func (h *HashNodeCache) del(hash common.Hash) {}
 
 func (h *HashNodeCache) Add(ly layer) {
 	if h == nil {
@@ -212,12 +179,12 @@ func (dl *diffLayer) parentLayer() layer {
 // The hash parameter can access the cache to speed up access.
 func (dl *diffLayer) node(owner common.Hash, path []byte, hash common.Hash, depth int) ([]byte, common.Hash, *nodeLoc, error) {
 	if hash != (common.Hash{}) {
-		if n := dl.cache.Get(hash); n != nil {
+		if blob := dl.cache.Get(hash); blob != nil {
 			// The query from the hash map is fastpath,
 			// avoiding recursive query of 128 difflayers.
 			diffHashCacheHitMeter.Mark(1)
-			diffHashCacheReadMeter.Mark(int64(n.Len))
-			return n.Blob(), n.Hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
+			diffHashCacheReadMeter.Mark(int64(len(blob)))
+			return blob, hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
 		}
 	}
 
