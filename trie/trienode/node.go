@@ -17,6 +17,7 @@
 package trienode
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -44,10 +45,44 @@ var (
 	nodeBlobDB *pebble.DB
 	cnt        uint64
 	stopGC     bool
+	hashNodeDB *pebble.DB
+	mu         sync.RWMutex
 )
 
 func ShutdownDB() {
 	stopGC = true
+}
+
+func Get(hash common.Hash) []byte {
+	mu.RLock()
+	defer mu.RUnlock()
+
+	iter, _ := hashNodeDB.NewIter(nil)
+	defer iter.Close()
+
+	if iter.SeekGE(hash.Bytes()); iter.Valid() {
+		hashKey := iter.Key()
+		if !bytes.Equal(hashKey[:common.HashLength], hash.Bytes()) {
+			return nil
+		}
+
+		value, _ := iter.ValueAndErr()
+		key := make([]byte, len(value))
+		copy(key, value)
+
+		// Get the node blob from the database
+		return getByKey(key)
+	}
+
+	return nil
+}
+
+func getByKey(key []byte) []byte {
+	value, closer, _ := nodeBlobDB.Get(key)
+	ret := make([]byte, len(value))
+	copy(ret, value)
+	_ = closer.Close()
+	return ret
 }
 
 // Node is a wrapper which contains the encoded blob of the trie node and its
@@ -64,11 +99,7 @@ func (n *Node) Blob() []byte {
 		return nil
 	}
 
-	value, closer, _ := nodeBlobDB.Get(n.key())
-	ret := make([]byte, len(value))
-	copy(ret, value)
-	_ = closer.Close()
-	return ret
+	return getByKey(n.key())
 }
 
 type HashBlob struct {
@@ -125,6 +156,13 @@ func (n *Node) key() []byte {
 	return key
 }
 
+func (n *Node) hashKey() []byte {
+	key := make([]byte, 8)
+	binary.BigEndian.PutUint64(key, n.idx)
+	key = append(n.Hash.Bytes(), key...)
+	return key
+}
+
 func InitNodeBlobDB(name string, inMemory bool) error {
 	// Already initialized
 	if nodeBlobDB != nil {
@@ -137,6 +175,21 @@ func InitNodeBlobDB(name string, inMemory bool) error {
 		return err
 	}
 	nodeBlobDB = db
+	return nil
+}
+
+func InitHashNodeDB(name string, inMemory bool) error {
+	// Already initialized
+	if hashNodeDB != nil {
+		return nil
+	}
+
+	// Initialize the database
+	db, err := initDB(name, inMemory)
+	if err != nil {
+		return err
+	}
+	hashNodeDB = db
 	return nil
 }
 
@@ -184,21 +237,33 @@ func New(hash common.Hash, blob []byte) *Node {
 	// Initialize the database for testing
 	once.Do(func() {
 		_ = InitNodeBlobDB("", true)
+		_ = InitHashNodeDB("", true)
 	})
 
 	// Increase the counter
 	idx := atomic.AddUint64(&cnt, 1)
 	n := &Node{Hash: hash, Len: len(blob), idx: idx}
 
+	if n.IsDeleted() {
+		return n
+	}
+
 	// Insert the node blob into the database
 	_ = nodeBlobDB.Set(n.key(), blob, pebble.NoSync)
+
+	// Insert the hash into the database
+	_ = hashNodeDB.Set(n.hashKey(), n.key(), pebble.NoSync)
 
 	// Set the finalizer to delete the node blob from the database
 	runtime.SetFinalizer(n, func(n *Node) {
 		if stopGC {
 			return
 		}
+
+		mu.Lock()
+		defer mu.Unlock()
 		_ = nodeBlobDB.Delete(n.key(), pebble.NoSync)
+		_ = hashNodeDB.Delete(n.hashKey(), pebble.NoSync)
 	})
 	return n
 }
