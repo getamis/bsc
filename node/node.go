@@ -781,6 +781,11 @@ func (n *Node) OpenNodeBlobDB() error {
 	return trienode.InitNodeBlobDB(n.ResolvePath("nodeblob"), false)
 }
 
+// OpenHashNodeDB opens the HashNode database.
+func (n *Node) OpenHashNodeDB() error {
+	return trienode.InitHashNodeDB(n.ResolvePath("hashnode"), false)
+}
+
 func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, config *ethconfig.Config) (ethdb.Database, error) {
 	var (
 		err                          error
@@ -848,6 +853,12 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 
 	// open DB for nodeblob
 	if err := n.OpenNodeBlobDB(); err != nil {
+		chainDB.Close()
+		return nil, err
+	}
+
+	// open DB for hashnode
+	if err := n.OpenHashNodeDB(); err != nil {
 		chainDB.Close()
 		return nil, err
 	}
