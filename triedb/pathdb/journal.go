@@ -19,6 +19,7 @@ package pathdb
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -58,11 +59,13 @@ type JournalWriter interface {
 
 	Close()
 	Size() uint64
+	Metadata() []byte
 }
 
 type JournalReader interface {
 	io.Reader
 	Close()
+	CheckMetadata(metadata []byte) bool
 }
 
 type JournalFileWriter struct {
@@ -102,6 +105,24 @@ func (fw *JournalFileWriter) Size() uint64 {
 	return uint64(fileInfo.Size())
 }
 
+func GetMetadata(fileInfo os.FileInfo) []byte {
+	metadata := make([]byte, 16)
+	binary.LittleEndian.PutUint64(metadata[:8], uint64(fileInfo.Size()))
+	binary.LittleEndian.PutUint64(metadata[8:], uint64(fileInfo.ModTime().Unix()))
+	return metadata
+}
+
+func (fw *JournalFileWriter) Metadata() []byte {
+	if fw.file == nil {
+		return nil
+	}
+	fileInfo, err := fw.file.Stat()
+	if err != nil {
+		log.Crit("Failed to stat journal", "err", err)
+	}
+	return GetMetadata(fileInfo)
+}
+
 func (kw *JournalKVWriter) Write(b []byte) (int, error) {
 	return kw.journalBuf.Write(b)
 }
@@ -115,6 +136,10 @@ func (kw *JournalKVWriter) Size() uint64 {
 	return uint64(kw.journalBuf.Len())
 }
 
+func (kw *JournalKVWriter) Metadata() []byte {
+	return nil
+}
+
 func (fr *JournalFileReader) Read(p []byte) (n int, err error) {
 	return fr.file.Read(p)
 }
@@ -123,11 +148,26 @@ func (fr *JournalFileReader) Close() {
 	fr.file.Close()
 }
 
+func (fr *JournalFileReader) CheckMetadata(metadata []byte) bool {
+	if fr.file == nil {
+		return false
+	}
+	fileInfo, err := fr.file.Stat()
+	if err != nil {
+		log.Crit("Failed to stat journal", "err", err)
+	}
+	return bytes.Equal(GetMetadata(fileInfo), metadata)
+}
+
 func (kr *JournalKVReader) Read(p []byte) (n int, err error) {
 	return kr.journalBuf.Read(p)
 }
 
 func (kr *JournalKVReader) Close() {
+}
+
+func (kr *JournalKVReader) CheckMetadata(metadata []byte) bool {
+	return true
 }
 
 func newJournalWriter(file string, db ethdb.Database, journalType JournalType) JournalWriter {
@@ -186,6 +226,24 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 		defer reader.Close()
 	}
 	r := rlp.NewStream(reader, 0)
+
+	// Check the journal metadata
+	if journalTypeForReader == JournalFileType {
+		journalFileMetadataPath := db.config.JournalFilePath + ".metadata"
+		metadata, err := os.ReadFile(journalFileMetadataPath)
+		if err != nil {
+			log.Warn("Failed to read journal metadata", "err", err)
+			return nil, errMissJournal
+		}
+		if len(metadata) != 16 {
+			log.Warn("Invalid journal metadata size", "size", len(metadata))
+			return nil, errMissJournal
+		}
+		if reader != nil && !reader.CheckMetadata(metadata) {
+			log.Warn("Invalid journal metadata", "metadata", metadata)
+			return nil, errMissJournal
+		}
+	}
 
 	// Firstly, resolve the first element as the journal version
 	version, err := r.Uint64()
@@ -568,6 +626,12 @@ func (db *Database) Journal(root common.Hash) error {
 
 	// Set the db in read only mode to reject all following mutations
 	db.readOnly = true
+	if db.DetermineJournalTypeForWriter() == JournalFileType {
+		journalFileMetadataPath := db.config.JournalFilePath + ".metadata"
+		if err := os.WriteFile(journalFileMetadataPath, journal.Metadata(), 0644); err != nil {
+			log.Warn("Failed to write journal metadata ", "err", err)
+		}
+	}
 	log.Info("Persisted dirty state to disk", "size", common.StorageSize(journalSize), "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
