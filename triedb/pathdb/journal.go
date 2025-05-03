@@ -527,6 +527,7 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 	if err := dl.parent.journal(w, journalType); err != nil {
 		return err
 	}
+	start := time.Now()
 	// Create a buffer to store encoded data
 	journalBuf := new(bytes.Buffer)
 	// Everything below was journaled, persist this layer too
@@ -545,6 +546,7 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 		return err
 	}
 
+	log.Info("Before journal buf write", "id", dl.stateID(), "block", dl.block, "elapsed", common.PrettyDuration(time.Since(start)))
 	// Store the journal buf into w and calculate checksum
 	if journalType == JournalFileType {
 		shasum := sha256.Sum256(journalBuf.Bytes())
@@ -560,7 +562,7 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 		}
 	}
 
-	log.Info("Journaled pathdb diff layer", "root", dl.root, "parent", dl.parent.rootHash(), "id", dl.stateID(), "block", dl.block)
+	log.Info("Journaled pathdb diff layer", "root", dl.root, "parent", dl.parent.rootHash(), "id", dl.stateID(), "block", dl.block, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 
