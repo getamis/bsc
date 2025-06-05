@@ -782,6 +782,16 @@ func (n *Node) OpenNodeSetDB() error {
 	return pathdb.InitNodeSetDB(n.ResolvePath("nodeset"), false)
 }
 
+// OpenNodeBlobDB opens the NodeBlob database.
+func (n *Node) OpenNodeBlobDB() error {
+	return pathdb.InitNodeBlobDB(n.ResolvePath("nodeblob"), false)
+}
+
+// OpenHashNodeDB opens the HashNode database.
+func (n *Node) OpenHashNodeDB() error {
+	return pathdb.InitHashNodeDB(n.ResolvePath("hashnode"), false)
+}
+
 func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, config *ethconfig.Config) (ethdb.Database, error) {
 	var (
 		err                          error
@@ -849,6 +859,18 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 
 	// open DB for nodeset
 	if err := n.OpenNodeSetDB(); err != nil {
+		chainDB.Close()
+		return nil, err
+	}
+
+	// open DB for nodeblob
+	if err := n.OpenNodeBlobDB(); err != nil {
+		chainDB.Close()
+		return nil, err
+	}
+
+	// open DB for hashnode
+	if err := n.OpenHashNodeDB(); err != nil {
 		chainDB.Close()
 		return nil, err
 	}

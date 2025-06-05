@@ -20,9 +20,13 @@ const (
 )
 
 var (
-	onceInitNodeSetDB sync.Once
-	nodeSetDB         *pebble.DB
-	stopGC            bool
+	onceInitNodeSetDB  sync.Once
+	onceInitNodeBlobDB sync.Once
+	nodeSetDB          *pebble.DB
+	nodeBlobDB         *pebble.DB
+	hashNodeDB         *pebble.DB
+	stopGC             bool
+	mu                 sync.RWMutex
 )
 
 func initDB(name string, inMemory bool) (*pebble.DB, error) {
@@ -79,6 +83,36 @@ func InitNodeSetDB(name string, inMemory bool) error {
 	return nil
 }
 
+func InitNodeBlobDB(name string, inMemory bool) error {
+	// Already initialized
+	if nodeBlobDB != nil {
+		return nil
+	}
+
+	// Initialize the database
+	db, err := initDB(name, inMemory)
+	if err != nil {
+		return err
+	}
+	nodeBlobDB = db
+	return nil
+}
+
+func InitHashNodeDB(name string, inMemory bool) error {
+	// Already initialized
+	if hashNodeDB != nil {
+		return nil
+	}
+
+	// Initialize the database
+	db, err := initDB(name, inMemory)
+	if err != nil {
+		return err
+	}
+	hashNodeDB = db
+	return nil
+}
+
 func disableGCForDB() {
 	stopGC = true
 }
@@ -118,6 +152,10 @@ func getNodeSet(root common.Hash) (*nodeSet, error) {
 }
 
 func deleteNodeSet(root common.Hash) error {
+	if stopGC {
+		return nil
+	}
+
 	onceInitNodeSetDB.Do(func() {
 		_ = InitNodeSetDB("", true)
 	})
@@ -125,5 +163,103 @@ func deleteNodeSet(root common.Hash) error {
 	if err := nodeSetDB.Delete(root[:], pebble.NoSync); err != nil {
 		return err
 	}
+	return nil
+}
+
+func setNodeBlob(root common.Hash, hash common.Hash, blob []byte) error {
+	onceInitNodeBlobDB.Do(func() {
+		_ = InitNodeBlobDB("", true)
+		_ = InitHashNodeDB("", true)
+	})
+
+	nodeBlobKey := append(root[:], hash[:]...)
+	hashNodeKey := append(hash[:], root[:]...)
+
+	if err := nodeBlobDB.Set(nodeBlobKey, blob, pebble.NoSync); err != nil {
+		return err
+	}
+	if err := hashNodeDB.Set(hashNodeKey, root[:], pebble.NoSync); err != nil {
+		return err
+	}
+	return nil
+}
+
+func getNodeBlob(hash common.Hash) []byte {
+	mu.RLock()
+	defer mu.RUnlock()
+
+	onceInitNodeBlobDB.Do(func() {
+		_ = InitNodeBlobDB("", true)
+		_ = InitHashNodeDB("", true)
+	})
+
+	iter, _ := hashNodeDB.NewIter(nil)
+	defer iter.Close()
+
+	if iter.SeekGE(hash.Bytes()); !iter.Valid() {
+		return nil
+	}
+
+	hashKey := iter.Key()
+	if !bytes.Equal(hashKey[:common.HashLength], hash[:]) {
+		return nil
+	}
+
+	value, _ := iter.ValueAndErr()
+	nodeBlobKey := make([]byte, len(value))
+	copy(nodeBlobKey, value)
+	nodeBlobKey = append(nodeBlobKey, hash[:]...)
+
+	blob, closer, err := nodeBlobDB.Get(nodeBlobKey)
+	if err != nil {
+		return nil
+	}
+	ret := make([]byte, len(blob))
+	copy(ret, blob)
+	_ = closer.Close()
+	return ret
+}
+
+func deleteNodeBlobs(root common.Hash) error {
+	if stopGC {
+		return nil
+	}
+
+	onceInitNodeBlobDB.Do(func() {
+		_ = InitNodeBlobDB("", true)
+		_ = InitHashNodeDB("", true)
+	})
+
+	iter, _ := nodeBlobDB.NewIter(nil)
+	defer iter.Close()
+
+	prefix := root[:]
+	for iter.SeekGE(prefix); iter.Valid(); iter.Next() {
+		if !bytes.HasPrefix(iter.Key(), prefix) {
+			break
+		}
+
+		err := deleteNodeBlob(root, iter.Key())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func deleteNodeBlob(root common.Hash, nodeBlobKey []byte) error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := nodeBlobDB.Delete(nodeBlobKey, pebble.NoSync); err != nil {
+		return err
+	}
+
+	hashNodeKey := append(nodeBlobKey[common.HashLength:], root[:]...)
+	if err := hashNodeDB.Delete(hashNodeKey, pebble.NoSync); err != nil {
+		return err
+	}
+
 	return nil
 }
