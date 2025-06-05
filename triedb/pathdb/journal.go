@@ -477,6 +477,7 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 	if err := rlp.Encode(journalBuf, dl.block); err != nil {
 		return err
 	}
+	_ = dl.getNodeSetFromDB()
 	// Write the accumulated trie nodes into buffer
 	if err := dl.nodes.encode(journalBuf); err != nil {
 		return err
@@ -515,6 +516,9 @@ func (db *Database) Journal(root common.Hash) error {
 	// Run the journaling
 	db.lock.Lock()
 	defer db.lock.Unlock()
+
+	// Disable GC for the memory offload DB
+	disableGCForDB()
 
 	// Retrieve the head layer to journal from.
 	l := db.tree.get(root)
