@@ -18,111 +18,25 @@ package pathdb
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
-type RefTrieNode struct {
-	refCount uint32
-	node     *trienode.Node
-}
+type HashNodeCache struct{}
 
-type HashNodeCache struct {
-	lock  sync.RWMutex
-	cache map[common.Hash]*RefTrieNode
-}
-
-func (h *HashNodeCache) length() int {
-	if h == nil {
-		return 0
-	}
-	h.lock.RLock()
-	defer h.lock.RUnlock()
-	return len(h.cache)
-}
-
-func (h *HashNodeCache) set(hash common.Hash, node *trienode.Node) {
-	if h == nil {
-		return
-	}
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	if n, ok := h.cache[hash]; ok {
-		n.refCount++
-	} else {
-		h.cache[hash] = &RefTrieNode{1, node}
-	}
-}
-
-func (h *HashNodeCache) Get(hash common.Hash) *trienode.Node {
-	if h == nil {
-		return nil
-	}
-	h.lock.RLock()
-	defer h.lock.RUnlock()
-	if n, ok := h.cache[hash]; ok {
-		return n.node
-	}
-	return nil
-}
-
-func (h *HashNodeCache) del(hash common.Hash) {
-	if h == nil {
-		return
-	}
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	n, ok := h.cache[hash]
-	if !ok {
-		return
-	}
-	if n.refCount > 0 {
-		n.refCount--
-	}
-	if n.refCount == 0 {
-		delete(h.cache, hash)
-	}
+func (h *HashNodeCache) Get(hash common.Hash) []byte {
+	return getNodeBlob(hash)
 }
 
 func (h *HashNodeCache) Add(ly layer) {
-	if h == nil {
-		return
-	}
-	dl, ok := ly.(*diffLayer)
-	if !ok {
-		return
-	}
-	beforeAdd := h.length()
-	for _, subset := range dl.nodes.nodes {
-		for _, node := range subset {
-			h.set(node.Hash, node)
-		}
-	}
-	diffHashCacheLengthGauge.Update(int64(h.length()))
-	log.Debug("Add difflayer to hash map", "root", ly.rootHash(), "block_number", dl.block, "map_len", h.length(), "add_delta", h.length()-beforeAdd)
+	// Should not need to add the cache of the diff layer.
 }
 
 func (h *HashNodeCache) Remove(ly layer) {
-	if h == nil {
-		return
-	}
-	dl, ok := ly.(*diffLayer)
-	if !ok {
-		return
-	}
-	go func() {
-		beforeDel := h.length()
-		for _, subset := range dl.nodes.nodes {
-			for _, node := range subset {
-				h.del(node.Hash)
-			}
-		}
-		diffHashCacheLengthGauge.Update(int64(h.length()))
-		log.Debug("Remove difflayer from hash map", "root", ly.rootHash(), "block_number", dl.block, "map_len", h.length(), "del_delta", beforeDel-h.length())
-	}()
+	// Should not need to remove the cache of the diff layer.
 }
 
 // diffLayer represents a collection of modifications made to the in-memory tries
@@ -159,15 +73,25 @@ func newDiffLayer(parent layer, root common.Hash, id uint64, block uint64, nodes
 	switch l := parent.(type) {
 	case *diskLayer:
 		dl.origin = l
-		dl.cache = &HashNodeCache{
-			cache: make(map[common.Hash]*RefTrieNode),
-		}
+		dl.cache = &HashNodeCache{}
 	case *diffLayer:
 		dl.origin = l.originDiskLayer()
 		dl.cache = l.cache
 	default:
 		panic("unknown parent type")
 	}
+
+	err := dl.offloadNodeSetToDB()
+	if err != nil {
+		log.Error("Failed to offload nodeSet to DB", "id", id, "block", block)
+	}
+
+	runtime.SetFinalizer(dl, func(dl *diffLayer) {
+		err := deleteNodeSet(dl.block, dl.root)
+		if err != nil {
+			log.Error("Failed to delete nodeSet", "id", dl.id, "block", dl.block, "root", dl.root.String(), "err", err)
+		}
+	})
 
 	dirtyNodeWriteMeter.Mark(int64(nodes.size))
 	dirtyStateWriteMeter.Mark(int64(states.size))
@@ -212,12 +136,12 @@ func (dl *diffLayer) parentLayer() layer {
 // The hash parameter can access the cache to speed up access.
 func (dl *diffLayer) node(owner common.Hash, path []byte, hash common.Hash, depth int) ([]byte, common.Hash, *nodeLoc, error) {
 	if hash != (common.Hash{}) {
-		if n := dl.cache.Get(hash); n != nil {
+		if blob := dl.cache.Get(hash); blob != nil {
 			// The query from the hash map is fastpath,
 			// avoiding recursive query of 128 difflayers.
 			diffHashCacheHitMeter.Mark(1)
-			diffHashCacheReadMeter.Mark(int64(len(n.Blob)))
-			return n.Blob, n.Hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
+			diffHashCacheReadMeter.Mark(int64(len(blob)))
+			return blob, hash, &nodeLoc{loc: locDiffLayer, depth: depth}, nil
 		}
 	}
 
@@ -347,6 +271,27 @@ func (dl *diffLayer) persist(force bool) (layer, error) {
 // size returns the approximate memory size occupied by this diff layer.
 func (dl *diffLayer) size() uint64 {
 	return dl.nodes.size + dl.states.size
+}
+
+func (dl *diffLayer) getNodeSetFromDB() error {
+	if dl.nodes.size > 0 {
+		return nil
+	}
+	nodes, err := getNodeSet(dl.block, dl.root)
+	if err != nil {
+		return err
+	}
+	dl.nodes = nodes
+	return nil
+}
+
+func (dl *diffLayer) offloadNodeSetToDB() error {
+	err := setNodeSet(dl.block, dl.root, dl.nodes)
+	if err != nil {
+		return err
+	}
+	dl.nodes.reset()
+	return nil
 }
 
 // diffToDisk merges a bottom-most diff into the persistent disk layer underneath
