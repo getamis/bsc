@@ -18,6 +18,7 @@ package pathdb
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -103,6 +104,8 @@ func (h *HashNodeCache) Add(ly layer) {
 	}
 	diffHashCacheLengthGauge.Update(int64(h.length()))
 	log.Debug("Add difflayer to hash map", "root", ly.rootHash(), "block_number", dl.block, "map_len", h.length(), "add_delta", h.length()-beforeAdd)
+	// Offload the node set to the database since nodes are added to the cache.
+	dl.offloadNodeSetToDB()
 }
 
 func (h *HashNodeCache) Remove(ly layer) {
@@ -113,6 +116,7 @@ func (h *HashNodeCache) Remove(ly layer) {
 	if !ok {
 		return
 	}
+	_ = dl.getNodeSetFromDB()
 	go func() {
 		beforeDel := h.length()
 		for _, subset := range dl.nodes.nodes {
@@ -168,6 +172,14 @@ func newDiffLayer(parent layer, root common.Hash, id uint64, block uint64, nodes
 	default:
 		panic("unknown parent type")
 	}
+
+	runtime.SetFinalizer(dl, func(dl *diffLayer) {
+		if stopGC {
+			return
+		}
+
+		_ = deleteNodeSet(dl.root)
+	})
 
 	dirtyNodeWriteMeter.Mark(int64(nodes.size))
 	dirtyStateWriteMeter.Mark(int64(states.size))
@@ -347,6 +359,27 @@ func (dl *diffLayer) persist(force bool) (layer, error) {
 // size returns the approximate memory size occupied by this diff layer.
 func (dl *diffLayer) size() uint64 {
 	return dl.nodes.size + dl.states.size
+}
+
+func (dl *diffLayer) offloadNodeSetToDB() error {
+	err := setNodeSet(dl.root, dl.nodes)
+	if err != nil {
+		return err
+	}
+	dl.nodes.reset() // Reset the node set after offloading to DB to free memory.
+	return nil
+}
+
+func (dl *diffLayer) getNodeSetFromDB() error {
+	if dl.nodes.size > 0 {
+		return nil
+	}
+	nodes, err := getNodeSet(dl.root)
+	if err != nil {
+		return err
+	}
+	dl.nodes = nodes
+	return nil
 }
 
 // diffToDisk merges a bottom-most diff into the persistent disk layer underneath
