@@ -24,6 +24,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -212,10 +213,13 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 		return nil, err
 	}
 	// Load all the diff layers from the journal
-	head, err := db.loadDiffLayer(base, r, journalTypeForReader)
+	sem := make(chan struct{}, 16)
+	wg := &sync.WaitGroup{}
+	head, err := db.loadDiffLayer(base, r, journalTypeForReader, sem, wg)
 	if err != nil {
 		return nil, err
 	}
+	wg.Wait()
 	log.Info("Loaded layer journal", "diskroot", diskRoot, "diffhead", head.rootHash(), "elapsed", common.PrettyDuration(time.Since(start)))
 	return head, nil
 }
@@ -349,7 +353,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 
 // loadDiffLayer reads the next sections of a layer journal, reconstructing a new
 // diff and verifying that it can be linked to the requested parent.
-func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForReader JournalType) (layer, error) {
+func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForReader JournalType, sem chan struct{}, wg *sync.WaitGroup) (layer, error) {
 	// Read the next diff journal entry
 	var (
 		root               common.Hash
@@ -405,7 +409,7 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForRea
 
 	log.Debug("Loaded diff layer journal", "root", root, "parent", parent.rootHash(), "id", parent.stateID()+1, "block", block)
 
-	return db.loadDiffLayer(newDiffLayer(parent, root, parent.stateID()+1, block, &nodes, &stateSet), r, journalTypeForReader)
+	return db.loadDiffLayer(newDiffLayerForJournal(parent, root, parent.stateID()+1, block, &nodes, &stateSet, sem, wg), r, journalTypeForReader, sem, wg)
 }
 
 // journal implements the layer interface, marshaling the un-flushed trie nodes
@@ -478,9 +482,11 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 		return err
 	}
 	// Write the accumulated trie nodes into buffer
+	dl.getNodeSetFromDB()
 	if err := dl.nodes.encode(journalBuf); err != nil {
 		return err
 	}
+	dl.nodes.reset()
 	// Write the associated flat state set into buffer
 	if err := dl.states.encode(journalBuf); err != nil {
 		return err
@@ -515,6 +521,9 @@ func (db *Database) Journal(root common.Hash) error {
 	// Run the journaling
 	db.lock.Lock()
 	defer db.lock.Unlock()
+
+	// Disable GC for the memory offload DB
+	disableGCForDB()
 
 	// Retrieve the head layer to journal from.
 	l := db.tree.get(root)

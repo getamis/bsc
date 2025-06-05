@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/VictoriaMetrics/fastcache"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -325,6 +326,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	}
 	// Merge the trie nodes and flat states of the bottom-most diff layer into the
 	// buffer as the combined layer.
+	bottom.getNodeSetFromDB()
 	combined := dl.buffer.commit(bottom.nodes, bottom.states.stateSet)
 	if err := combined.flush(dl.db.diskdb, dl.db.freezer, dl.nodes, bottom.stateID(), force); err != nil {
 		return nil, err
