@@ -25,7 +25,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"sync"
 	"time"
+
+	"github.com/klauspost/readahead"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -224,7 +228,13 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 	if reader != nil {
 		defer reader.Close()
 	}
-	r := rlp.NewStream(reader, 0)
+
+	aheadReader, err := readahead.NewReaderSize(reader, 4, 64*1024*1024)
+	if err != nil {
+		return nil, err
+	}
+
+	r := rlp.NewStream(aheadReader, 0)
 
 	// Check the journal metadata
 	if journalTypeForReader == JournalFileType {
@@ -270,10 +280,13 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 		return nil, err
 	}
 	// Load all the diff layers from the journal
-	head, err := db.loadDiffLayer(base, r, journalTypeForReader)
+	sem := make(chan struct{}, 16)
+	wg := &sync.WaitGroup{}
+	head, err := db.loadDiffLayer(base, r, journalTypeForReader, sem, wg)
 	if err != nil {
 		return nil, err
 	}
+	wg.Wait()
 	log.Info("Loaded layer journal", "diskroot", diskRoot, "diffhead", head.rootHash(), "elapsed", common.PrettyDuration(time.Since(start)))
 	return head, nil
 }
@@ -407,7 +420,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 
 // loadDiffLayer reads the next sections of a layer journal, reconstructing a new
 // diff and verifying that it can be linked to the requested parent.
-func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForReader JournalType) (layer, error) {
+func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForReader JournalType, sem chan struct{}, wg *sync.WaitGroup) (layer, error) {
 	// Read the next diff journal entry
 	var (
 		root               common.Hash
@@ -463,12 +476,12 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForRea
 
 	log.Debug("Loaded diff layer journal", "root", root, "parent", parent.rootHash(), "id", parent.stateID()+1, "block", block)
 
-	return db.loadDiffLayer(newDiffLayer(parent, root, parent.stateID()+1, block, &nodes, &stateSet), r, journalTypeForReader)
+	return db.loadDiffLayer(newDiffLayerForJournal(parent, root, parent.stateID()+1, block, &nodes, &stateSet, sem, wg), r, journalTypeForReader, sem, wg)
 }
 
 // journal implements the layer interface, marshaling the un-flushed trie nodes
 // along with layer metadata into provided byte buffer.
-func (dl *diskLayer) journal(w io.Writer, journalType JournalType) error {
+func (dl *diskLayer) journal(w io.Writer, journalType JournalType, _ chan struct{}, _ *errgroup.Group, notify chan<- struct{}) error {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
@@ -513,53 +526,78 @@ func (dl *diskLayer) journal(w io.Writer, journalType JournalType) error {
 	}
 
 	log.Info("Journaled pathdb disk layer", "root", dl.root)
+
+	// Notify the next layer that this layer has been journaled
+	notify <- struct{}{}
+
 	return nil
 }
 
 // journal implements the layer interface, writing the memory layer contents
 // into a buffer to be stored in the database as the layer journal.
-func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
+func (dl *diffLayer) journal(w io.Writer, journalType JournalType, sem chan struct{}, eg *errgroup.Group, notify chan<- struct{}) error {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
+	notifyFromParent := make(chan struct{}, 1)
+
 	// journal the parent first
-	if err := dl.parent.journal(w, journalType); err != nil {
-		return err
-	}
-	// Create a buffer to store encoded data
-	journalBuf := new(bytes.Buffer)
-	// Everything below was journaled, persist this layer too
-	if err := rlp.Encode(journalBuf, dl.root); err != nil {
-		return err
-	}
-	if err := rlp.Encode(journalBuf, dl.block); err != nil {
-		return err
-	}
-	// Write the accumulated trie nodes into buffer
-	if err := dl.nodes.encode(journalBuf); err != nil {
-		return err
-	}
-	// Write the associated flat state set into buffer
-	if err := dl.states.encode(journalBuf); err != nil {
+	if err := dl.parent.journal(w, journalType, sem, eg, notifyFromParent); err != nil {
 		return err
 	}
 
-	// Store the journal buf into w and calculate checksum
-	if journalType == JournalFileType {
-		shasum := sha256.Sum256(journalBuf.Bytes())
-		if err := rlp.Encode(w, journalBuf.Bytes()); err != nil {
-			return err
-		}
-		if err := rlp.Encode(w, shasum); err != nil {
-			return err
-		}
-	} else {
-		if _, err := w.Write(journalBuf.Bytes()); err != nil {
-			return err
-		}
-	}
+	sem <- struct{}{} // acquire semaphore to limit concurrency
+	eg.Go(func() error {
+		defer func() { <-sem }()
+		defer func() {
+			// Notify the next layer that this layer has been journaled
+			if notify != nil {
+				notify <- struct{}{}
+			}
+		}()
 
-	log.Info("Journaled pathdb diff layer", "root", dl.root, "parent", dl.parent.rootHash(), "id", dl.stateID(), "block", dl.block)
+		// Create a buffer to store encoded data
+		journalBuf := new(bytes.Buffer)
+		// Everything below was journaled, persist this layer too
+		if err := rlp.Encode(journalBuf, dl.root); err != nil {
+			return err
+		}
+		if err := rlp.Encode(journalBuf, dl.block); err != nil {
+			return err
+		}
+		// Write the accumulated trie nodes into buffer
+		_ = dl.getNodeSetFromDB()
+		if err := dl.nodes.encode(journalBuf); err != nil {
+			return err
+		}
+		dl.nodes.reset()
+		// Write the associated flat state set into buffer
+		if err := dl.states.encode(journalBuf); err != nil {
+			return err
+		}
+
+		// Get the notify channel from the previous layer
+		<-notifyFromParent
+
+		// Store the journal buf into w and calculate checksum
+		if journalType == JournalFileType {
+			shasum := sha256.Sum256(journalBuf.Bytes())
+			if err := rlp.Encode(w, journalBuf.Bytes()); err != nil {
+				return err
+			}
+			if err := rlp.Encode(w, shasum); err != nil {
+				return err
+			}
+		} else {
+			if _, err := w.Write(journalBuf.Bytes()); err != nil {
+				return err
+			}
+		}
+
+		log.Info("Journaled pathdb diff layer", "root", dl.root, "parent", dl.parent.rootHash(), "id", dl.stateID(), "block", dl.block)
+		return nil
+	})
+
 	return nil
 }
 
@@ -573,6 +611,9 @@ func (db *Database) Journal(root common.Hash) error {
 	// Run the journaling
 	db.lock.Lock()
 	defer db.lock.Unlock()
+
+	// Disable GC for the memory offload DB
+	disableGCForDB()
 
 	// Retrieve the head layer to journal from.
 	l := db.tree.get(root)
@@ -611,7 +652,12 @@ func (db *Database) Journal(root common.Hash) error {
 		return err
 	}
 	// Finally write out the journal of each layer in reverse order.
-	if err := l.journal(journal, db.DetermineJournalTypeForWriter()); err != nil {
+	sem := make(chan struct{}, 16)
+	eg := &errgroup.Group{}
+	if err := l.journal(journal, db.DetermineJournalTypeForWriter(), sem, eg, nil); err != nil {
+		return err
+	}
+	if err := eg.Wait(); err != nil {
 		return err
 	}
 	// Store the journal into the database and return
