@@ -96,6 +96,49 @@ func newDiffLayer(parent layer, root common.Hash, id uint64, block uint64, nodes
 	return dl
 }
 
+func newDiffLayerForJournal(parent layer, root common.Hash, id uint64, block uint64, nodes *nodeSet, states *StateSetWithOrigin, sem chan struct{}, wg *sync.WaitGroup) *diffLayer {
+	dl := &diffLayer{
+		root:   root,
+		id:     id,
+		block:  block,
+		parent: parent,
+		nodes:  nodes,
+		states: states,
+	}
+
+	switch l := parent.(type) {
+	case *diskLayer:
+		dl.origin = l
+		dl.cache = &HashNodeCache{}
+	case *diffLayer:
+		dl.origin = l.originDiskLayer()
+		dl.cache = l.cache
+	default:
+		panic("unknown parent type")
+	}
+
+	runtime.SetFinalizer(dl, func(dl *diffLayer) {
+		_ = deleteNodeSet(dl.block, dl.root)
+	})
+
+	dirtyNodeWriteMeter.Mark(int64(nodes.size))
+	dirtyStateWriteMeter.Mark(int64(states.size))
+	log.Debug("Created new diff layer", "id", id, "block", block, "nodesize", common.StorageSize(nodes.size), "statesize", common.StorageSize(states.size))
+
+	sem <- struct{}{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() { <-sem }()
+		err := dl.offloadNodeSetToDB()
+		if err != nil {
+			log.Debug("Failed to offload nodeSet to DB", "id", id, "block", block)
+		}
+	}()
+
+	return dl
+}
+
 func (dl *diffLayer) originDiskLayer() *diskLayer {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()

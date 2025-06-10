@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"testing"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -166,6 +168,9 @@ func BenchmarkJournal(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		layer.journal(new(bytes.Buffer), JournalKVType)
+		sem := make(chan struct{}, 16)
+		eg := &errgroup.Group{}
+		layer.journal(new(bytes.Buffer), JournalKVType, sem, eg, nil)
+		_ = eg.Wait()
 	}
 }
