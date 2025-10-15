@@ -69,6 +69,10 @@ type txIndexer struct {
 // newTxIndexer initializes the transaction indexer.
 func newTxIndexer(limit uint64, chain *BlockChain) *txIndexer {
 	cutoff, _ := chain.HistoryPruningCutoff()
+	// If the database has a higher cutoff (due to ancient pruning), adjust the cutoff accordingly.
+	if dbTail, err := chain.db.Tail(); err == nil {
+		cutoff = max(cutoff, dbTail)
+	}
 	indexer := &txIndexer{
 		limit:  limit,
 		cutoff: cutoff,
@@ -315,7 +319,12 @@ func (indexer *txIndexer) report(head uint64, tail *uint64) TxIndexProgress {
 	if indexer.limit == 0 || total > head {
 		total = head + 1 // genesis included
 	}
-	length := head - indexer.cutoff + 1 // all available chain for indexing
+	cutoff := indexer.cutoff
+	// If the database has a higher cutoff (due to ancient pruning), adjust the cutoff accordingly.
+	if dbTail, err := indexer.db.Tail(); err == nil {
+		cutoff = max(cutoff, dbTail)
+	}
+	length := head - cutoff + 1 // all available chain for indexing
 	if total > length {
 		total = length
 	}
